@@ -1,229 +1,171 @@
-# LinkedIn Post Scheduler & Automation Engine (Backend)
+# LinkedIn Automation
 
-[![NestJS](https://img.shields.io/badge/NestJS-12.x-E0234E?logo=nestjs&logoColor=white)](https://nestjs.com/)
-[![Fastify](https://img.shields.io/badge/Fastify-5.x-000000?logo=fastify&logoColor=white)](https://fastify.dev/)
-[![Prisma](https://img.shields.io/badge/Prisma-5.x-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supabase-316192?logo=postgresql&logoColor=white)](https://supabase.com/)
-[![LinkedIn API](https://img.shields.io/badge/LinkedIn-Posts%20API-0A66C2?logo=linkedin&logoColor=white)](https://learn.microsoft.com/en-us/linkedin/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
-A high-performance, production-ready NestJS REST API backend built on the **Fastify** engine, integrated with **Supabase (PostgreSQL)** via **Prisma ORM**. The platform handles LinkedIn OAuth 2.0 authentication, secure session management with `HttpOnly` cookies, proactive 24-hour token refreshes, post scheduling for personal profiles and company pages, and automated execution via a bounded concurrent task scheduler and Server-Sent Events (SSE).
+### Master of Computer Applications (MCA) Capstone Project
+**Submitted to:** Uttaranchal University, Dehradun  
+**Student Name:** Rahul Kumar Shaw  
+**Learner ID:** 2426010028  
+**Project Guide:** Mr. Anshuman Sahu (Manager, Indxx, Gurugram)  
 
 ---
 
-## Architecture Overview
+## 1. Project Overview & Objectives
+
+In modern professional life, maintaining a consistent posting schedule on LinkedIn is essential for career development and technical networking. However, students and working professionals frequently struggle with consistency due to academic pressure, work commitments, and project deadlines.
+
+**LinkedIn Automation** is a full-stack web application designed to help users compose, schedule, manage, and automatically publish LinkedIn posts in advance through the official LinkedIn REST API.
+
+### Key Objectives
+* **Post Scheduling:** Compose posts (up to 3,000 characters) and select future dates and times for automated publishing.
+* **Automated Dispatching:** An autonomous background worker service that periodically scans the database and publishes due posts via the LinkedIn REST API.
+* **Queue Management:** Complete lifecycle management allowing users to view, manage, and cancel scheduled posts before dispatch.
+* **Real-time Status Tracking:** Real-time visibility into post statuses (`PENDING`, `PROCESSING`, `PUBLISHED`, `FAILED`) with detailed error logs for failed dispatches.
+
+---
+
+## 2. Technology Stack & Requirements
+
+### Software Specifications
+* **Frontend:** Angular 22, HTML5, CSS3, Tailwind CSS, TypeScript
+* **Backend:** NestJS 12, Fastify, Node.js runtime
+* **Database:** PostgreSQL (hosted on Supabase Cloud)
+* **ORM:** Prisma ORM 5.x
+* **API Integration:** Official LinkedIn Posts REST API (`/rest/posts`)
+* **Real-Time Communication:** Server-Sent Events (SSE) via RxJS
+* **API Documentation:** OpenAPI / Swagger UI
+
+### Hardware & Environment Requirements
+* **Operating System:** Windows 10/11, Linux (Ubuntu), or macOS
+* **Runtime:** Node.js >= 20.x, npm >= 10.x
+* **Memory:** Minimum 8 GB RAM recommended
+* **Storage:** 20 GB available SSD space
+
+---
+
+## 3. System Architecture & Modules
+
+The application is structured into four core modules as defined in the project specification:
 
 ```
-                      ┌──────────────────────────────────────┐
-                      │    Client / Frontend (Angular 22)    │
-                      └──────────────────┬───────────────────┘
-                                         │
-             ┌───────────────────────────┼───────────────────────────┐
-             │                           │                           │
-             ▼                           ▼                           ▼
-    [ OAuth & Session ]           [ Post Scheduling ]        [ Scheduled Trigger ]
-    GET  /auth/linkedin/login-url POST /posts/schedule       POST /api/trigger-posts
-    GET  /auth/linkedin/callback  GET  /posts/user/:userId   (Protected by X-Cron-Secret)
-    GET  /auth/linkedin/me        GET  /posts/events/:userId (Real-time SSE stream)
-             │                           │                           │
-             └───────────────────────────┼───────────────────────────┘
-                                         ▼
-                      ┌──────────────────────────────────────┐
-                      │      Fastify NestJS 12 Engine        │
-                      │  - Gzip / Deflate Compression        │
-                      │  - HttpOnly Cookie Session Auth      │
-                      │  - Fail-Fast DTO Validation Pipe     │
-                      └──────────────────┬───────────────────┘
-                                         │
-                                         ▼
-                      ┌──────────────────────────────────────┐
-                      │    Prisma ORM & Supabase Postgres    │
-                      │  - LinkedInAccount (tokens, status)  │
-                      │  - ScheduledPost (composite indexes) │
-                      │  - LinkedInOrganization (pages)      │
-                      └──────────────────┬───────────────────┘
-                                         │
-                   ┌─────────────────────┴─────────────────────┐
-                   ▼                                           ▼
-         [ In-Process Cron Job ]                   [ External Webhook Ping ]
-        @Cron(EVERY_MINUTE)                        cron-job.org / Render
-                   │                                           │
-                   └─────────────────────┬─────────────────────┘
-                                         │
-                                         ▼
-                         1. Query due PENDING posts (Batch: 50)
-                         2. Atomic Lock: status -> PROCESSING
-                         3. Proactive Token Refresh (if <24h)
-                         4. Bounded Parallelism (5 concurrent workers)
-                         5. Publish via LinkedIn REST API (/rest/posts)
-                         6. Update status -> PUBLISHED / FAILED
-                         7. Emit Real-time SSE Event to Frontend
-                                         │
-                                         ▼
-                      ┌──────────────────────────────────────┐
-                      │       LinkedIn Posts REST API        │
-                      │        (/rest/posts v202610)         │
-                      └──────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Angular Frontend UI                      │
+│     (OAuth Login, Post Composer, Queue & Real-time Stream)   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ HTTP / Cookie Session / SSE
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   NestJS Fastify Backend                     │
+│  ┌───────────────────────┐       ┌───────────────────────┐  │
+│  │ Authentication Module │       │ Post Management Module│  │
+│  └───────────────────────┘       └───────────────────────┘  │
+│  ┌───────────────────────┐       ┌───────────────────────┐  │
+│  │ Scheduler & Dispatch  │       │ Real-Time SSE Events  │  │
+│  └───────────────────────┘       └───────────────────────┘  │
+└──────────────┬───────────────────────────────┬──────────────┘
+               │ Prisma ORM                    │ HTTPS (Bearer)
+               ▼                               ▼
+┌──────────────────────────────┐ ┌────────────────────────────┐
+│ Supabase PostgreSQL Database │ │  LinkedIn REST API Endpoint│
+│ (Accounts, Scheduled Posts)  │ │      (/rest/posts v202610) │
+└──────────────────────────────┘ └────────────────────────────┘
 ```
 
----
-
-## Core Features & Modules
-
-### 1. LinkedIn OAuth 2.0 & Session Management (`LinkedInAuthModule`)
-- **Direct Browser Redirect & Exchange:** Handles OAuth callback, exchanges authorization code for access and refresh tokens, maps member identifier, and stores credentials in PostgreSQL.
-- **Secure `HttpOnly` Cookies:** Sets `SameSite: Lax`, `HttpOnly` session cookie (`la_session`) preventing XSS token theft.
-- **Proactive Token Refresh:** Evaluates token expiration prior to publishing. If an access token is expired or within 24 hours of expiry, it automatically uses the refresh token to obtain fresh credentials.
-- **Company Pages / Organizations:** Automatically queries and provisions company pages that the user administers for multi-target publishing.
-
-### 2. LinkedIn Post Publishing (`LinkedInPostModule`)
-- Formats request payloads adhering strictly to LinkedIn Posts API specifications (`https://api.linkedin.com/rest/posts`).
-- Attaches required protocol headers: `LinkedIn-Version`, `X-Restli-Protocol-Version: 2.0.0`, and Bearer tokens.
-- Supports publishing to both **Personal Profile feeds** (`urn:li:person:...`) and **Company / Organization pages** (`urn:li:organization:...`).
-- Incorporates `AbortSignal.timeout(15000)` to prevent worker socket hangs.
-
-### 3. High-Throughput Scheduler (`SchedulerModule`)
-- **Automated Cron Engine:** Evaluates due posts every minute using `@nestjs/schedule`.
-- **Atomic Database Locking:** Uses conditional updates (`where: { id, status: 'PENDING' }, data: { status: 'PROCESSING' }`) guaranteeing zero duplicate executions across concurrent cron cycles or clustered workers.
-- **Bounded Concurrency:** Executes publishing in parallel worker chunks (`CONCURRENCY_LIMIT = 5` via `Promise.allSettled`) delivering a 5x throughput increase.
-- **Webhook Endpoint (`POST /api/trigger-posts`):** Authenticated with `crypto.timingSafeEqual` header check (`X-Cron-Secret`), enabling external heartbeat monitors (e.g. cron-job.org) to trigger processing on free or serverless tiers.
-
-### 4. Real-Time Server-Sent Events (`EventsModule`)
-- Exposes persistent HTTP event streams (`GET /posts/events/:userId`) via RxJS.
-- Emits real-time lifecycle notifications (`POST_PROCESSING`, `POST_PUBLISHED`, `POST_FAILED`) to update dashboard analytics instantly.
-- Includes a 25-second keepalive heartbeat ping to prevent connection drops by reverse proxies.
+### Module Breakdown
+1. **Authentication Module (`LinkedInAuthModule`):** Manages user authentication using LinkedIn OAuth 2.0 with state verification. Exchanges authorization codes for access and refresh tokens, maintains user sessions via secure `HttpOnly` cookies, and handles proactive 24-hour token refreshes.
+2. **Post Management Module (`PostsModule`):** Provides endpoints to create, list, retrieve, and cancel scheduled posts. Enforces payload validation (character limits up to 3000 chars, valid timestamps).
+3. **Scheduler & Dispatcher Module (`SchedulerModule`):** A lightweight background cron service that runs every minute to query due posts, atomically lock records to prevent duplicate execution, and dispatch posts to LinkedIn.
+4. **Real-time Event Stream (`EventsModule`):** Server-Sent Events (SSE) channel that notifies the user interface in real time when posts transition through `POST_PROCESSING`, `POST_PUBLISHED`, or `POST_FAILED`.
 
 ---
 
-## Tech Stack
+## 4. Database Schema (Prisma & PostgreSQL)
 
-| Category | Technology | Description |
-| :--- | :--- | :--- |
-| **Framework** | [NestJS 12](https://nestjs.com/) | Modular Node.js framework with TypeScript |
-| **HTTP Engine** | [Fastify 5](https://fastify.dev/) | High-performance, low-overhead HTTP platform |
-| **Database** | [PostgreSQL (Supabase)](https://supabase.com/) | Relational database with PgBouncer connection pooling |
-| **ORM** | [Prisma 5.x](https://www.prisma.io/) | Type-safe query builder and schema management |
-| **Task Scheduling** | `@nestjs/schedule` | In-process cron scheduler |
-| **API Docs** | `@nestjs/swagger` | OpenAPI Swagger documentation at `/api/docs` |
-| **Compression** | `@fastify/compress` | Gzip & deflate response compression |
-| **Cookies** | `@fastify/cookie` | Fastify HttpOnly cookie parser |
-| **Validation** | `class-validator`, `class-transformer` | Strict schema validation with fail-fast execution |
+The relational database is hosted on **Supabase Cloud** and managed via **Prisma ORM**:
+
+* **`LinkedInAccount` (User Entity):** Stores user profile details (`userId`, `linkedInId`, `name`, `email`), encrypted OAuth access and refresh tokens, token expiration timestamps, and account status (`ACTIVE`, `EXPIRED`, `DISCONNECTED`).
+* **`ScheduledPost` (Post Entity):** Stores the scheduled commentary text, target execution time (`scheduledTime`), publishing status (`PENDING`, `PROCESSING`, `PUBLISHED`, `FAILED`), target author URN, returned `linkedInPostId`, and error diagnostics (`failureReason`).
+* **`LinkedInOrganization` (Company Page Entity):** Stores company pages administered by the user for multi-target publishing.
+
+### Key Database Indexes
+* `ScheduledPost(status, scheduledTime)` — Optimizes the recurring 1-minute scheduler query.
+* `ScheduledPost(userId, scheduledTime)` — Delivers pre-sorted user dashboard queries.
 
 ---
 
-## Getting Started
+## 5. Security Mechanisms
 
-### 1. Prerequisites
-- **Node.js** >= 20.x
-- **npm** >= 10.x
-- A **Supabase PostgreSQL** database
-- A **LinkedIn Developer Application** with `Share on LinkedIn` or `Sign In with LinkedIn using OpenID Connect` enabled
+* **OAuth 2.0 Protocol:** No user passwords are stored or handled. Authentication is delegated directly to LinkedIn's official OAuth servers with unique state hashes to prevent CSRF.
+* **HttpOnly Session Cookies:** User session identifiers are delivered via `HttpOnly`, `SameSite: Lax` cookies (`la_session`), preventing client-side script access and XSS-based session hijacking.
+* **SQL Injection Prevention:** All database operations use Prisma ORM parameterized queries.
+* **Input Validation & Sanitization:** Strict class-validator DTO guards prevent malformed payloads and buffer overruns.
+* **Timing-Safe Webhook Protection:** Scheduler webhook triggers utilize `crypto.timingSafeEqual` constant-time verification.
 
-### 2. Installation
+---
+
+## 6. Setup & Installation
+
+### 1. Clone the Repository
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/rahul-shaw18/linkedin-automation.git
 cd linkedin-automation
+```
+
+### 2. Install Dependencies
+```bash
 npm install
 ```
 
-### 3. Environment Configuration
-Copy `.example.env` to `.env` and fill in your values:
-
+### 3. Environment Variables
+Copy `.example.env` to `.env` and configure your credentials:
 ```bash
 cp .example.env .env
 ```
 
+Key configuration parameters:
 ```env
-# Database
 DATABASE_URL="postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:6543/postgres?pgbouncer=true"
 DIRECT_URL="postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres"
 
-# LinkedIn OAuth 2.0
 LINKEDIN_CLIENT_ID="your_linkedin_client_id"
 LINKEDIN_CLIENT_SECRET="your_linkedin_client_secret"
 LINKEDIN_REDIRECT_URI="http://localhost:3000/auth/linkedin/callback"
-LINKEDIN_SCOPES="openid profile email w_member_social"
-LINKEDIN_API_VERSION="202610"
 
-# Application
-PORT=3000
-NODE_ENV=development
+CRON_SECRET_KEY="your_secure_cron_key"
 FRONTEND_URL="http://localhost:4200"
-
-# Scheduler Webhook Secret
-CRON_SECRET_KEY="your_secure_random_string"
-
-# Simulation Flag for Company Pages during testing
-ALLOW_SIMULATED_ORG_POST="true"
+PORT=3000
 ```
 
 ### 4. Database Setup
 ```bash
-# Push schema and composite indexes to PostgreSQL
 npx prisma db push
-
-# Generate Prisma Client
 npx prisma generate
 ```
 
-### 5. Running the Application
+### 5. Run the Application
 ```bash
-# Development mode with hot-reload
+# Development Mode (Hot Reload)
 npm run start:dev
 
-# Production build and run
+# Production Build & Run
 npm run build
 npm run start:prod
 ```
 
-### 6. Interactive API Documentation
-Once running, open:
-- 📚 **Swagger UI:** [http://localhost:3000/api/docs](http://localhost:3000/api/docs)
-- 📄 **OpenAPI Spec:** [http://localhost:3000/api/docs-json](http://localhost:3000/api/docs-json)
-- 🩺 **Health Check:** [http://localhost:3000/health](http://localhost:3000/health)
+* **Swagger API Documentation:** [http://localhost:3000/api/docs](http://localhost:3000/api/docs)
+* **Health Check Probe:** [http://localhost:3000/health](http://localhost:3000/health)
+* **Prisma Database Studio:** `npm run prisma:studio` ([http://localhost:5555](http://localhost:5555))
 
 ---
 
-## API Reference
+## 7. Future Enhancements
 
-### Authentication (`/auth/linkedin`)
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/auth/linkedin/login-url` | Generate LinkedIn OAuth authorization URL |
-| `GET` | `/auth/linkedin/callback` | Browser redirect callback from LinkedIn OAuth screen |
-| `POST` | `/auth/linkedin/callback` | Programmatic authorization code exchange |
-| `GET` | `/auth/linkedin/me` | Fetch active session from `la_session` cookie |
-| `POST` | `/auth/linkedin/logout` | Clear session cookie |
-| `GET` | `/auth/linkedin/accounts/:userId` | List connected LinkedIn accounts |
-| `DELETE` | `/auth/linkedin/accounts/:accountId` | Disconnect LinkedIn account |
-| `GET` | `/auth/linkedin/organizations/:userId` | List accessible company pages |
-| `POST` | `/auth/linkedin/organizations/:userId` | Add custom company page |
-
-### Scheduled Posts (`/posts`)
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/posts/schedule` | Schedule a new post |
-| `GET` | `/posts/user/:userId` | Retrieve posts for a user with pagination (`limit`, `offset`) |
-| `GET` | `/posts/:postId` | Get post details and execution failure log |
-| `DELETE` | `/posts/:postId` | Cancel/delete a pending post |
-| `POST` | `/posts/:postId/retry` | Reschedule a failed post |
-| `GET` | `/posts/events/:userId` | Server-Sent Events (SSE) real-time stream |
-
-### Webhooks & System (`/api`, `/health`)
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api/trigger-posts` | Webhook trigger for scheduler (Requires `X-Cron-Secret`) |
-| `GET` | `/health` | System health probe (5s TTL database cache) |
+* **Multi-Platform Publishing:** Expanding the dispatch engine to support cross-posting to other social platforms (e.g., X/Twitter, Threads).
+* **Rich Media Attachments:** Uploading images, infographics, and PDF carousels via LinkedIn Media Asset APIs.
+* **AI Content Suggestions:** Integrated hashtag and heading recommendations using AI language models.
 
 ---
 
-## Database Management
-```bash
-# Launch Prisma Studio database GUI (Port 5555)
-npm run prisma:studio
-```
+## 8. License & Acknowledgments
 
----
+This project is developed for academic evaluation as part of the MCA degree program at **Uttaranchal University, Dehradun**.
 
-## License
-MIT
+Licensed under the [MIT License](LICENSE).
