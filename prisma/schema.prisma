@@ -1,0 +1,80 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum AccountStatus {
+  ACTIVE
+  EXPIRED
+  DISCONNECTED
+}
+
+enum PostStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+}
+
+model LinkedInAccount {
+  id             String                 @id @default(uuid())
+  userId         String                 // Maps to App/Clerk User ID
+  linkedInId     String                 // LinkedIn Member URN ID (sub / person id)
+  name           String?                // LinkedIn Member Full Name
+  email          String?                // LinkedIn Member Email
+  pictureUrl     String?                @db.Text // LinkedIn Member Profile Picture URL
+  accessToken    String                 @db.Text
+  refreshToken   String?                @db.Text
+  tokenExpiresAt DateTime
+  status         AccountStatus          @default(ACTIVE)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  posts          ScheduledPost[]
+  organizations  LinkedInOrganization[]
+
+  @@unique([userId, linkedInId])
+  @@index([userId, status])
+}
+
+model LinkedInOrganization {
+  id             String          @id @default(uuid())
+  accountId      String
+  account        LinkedInAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  orgId          String          // LinkedIn numerical ID e.g. "98765432" or vanity
+  orgUrn         String          // e.g. "urn:li:organization:98765432"
+  name           String          // e.g. "Loadgo"
+  vanityName     String?         // e.g. "loadgo"
+  logoUrl        String?         @db.Text
+  role           String?         @default("ADMINISTRATOR")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([accountId, orgUrn])
+  @@index([accountId])
+}
+
+model ScheduledPost {
+  id             String          @id @default(uuid())
+  userId         String
+  accountId      String
+  account        LinkedInAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  content        String          @db.Text
+  scheduledTime  DateTime
+  status         PostStatus      @default(PENDING)
+  targetType     String?         @default("PERSON") // "PERSON" | "ORGANIZATION"
+  targetUrn      String?         // e.g. "urn:li:organization:98765432" or null for personal
+  targetName     String?         // e.g. "Loadgo" or personal name
+  linkedInPostId String?
+  failureReason  String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([userId, scheduledTime])
+  @@index([status, scheduledTime])
+  @@index([accountId])
+}
