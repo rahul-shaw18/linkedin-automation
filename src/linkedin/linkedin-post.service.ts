@@ -82,10 +82,7 @@ export class LinkedInPostService {
         // LinkedIn strictly requires w_organization_social (Community Management API) to post on behalf of an organization.
         if (
           authorUrn.startsWith('urn:li:organization:') &&
-          (status === 400 || status === 403) &&
-          (linkedinMessage.includes('Organization Or Events permissions') ||
-            linkedinMessage.includes('w_organization_social') ||
-            linkedinMessage.includes('organization'))
+          (status === 400 || status === 401 || status === 403 || status === 422)
         ) {
           const allowSimulated =
             this.configService.get<string>('ALLOW_SIMULATED_ORG_POST') === 'true';
@@ -106,7 +103,7 @@ export class LinkedInPostService {
           }
 
           throw new BadRequestException(
-            `LinkedIn requires the 'Community Management API' product (w_organization_social scope) on your Developer App to publish directly to company pages. Without this product, LinkedIn only allows publishing to your personal profile.`,
+            linkedinMessage,
           );
         }
 
@@ -117,7 +114,7 @@ export class LinkedInPostService {
         }
 
         if (status === 400) {
-          throw new BadRequestException(`Invalid post payload sent to LinkedIn: ${linkedinMessage}`);
+          throw new BadRequestException(linkedinMessage);
         }
 
         if (status === 429) {

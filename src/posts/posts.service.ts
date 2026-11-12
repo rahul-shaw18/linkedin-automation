@@ -46,6 +46,26 @@ export class PostsService {
       );
     }
 
+    let targetUrn = dto.targetUrn?.trim() || null;
+    if (dto.targetType === 'ORGANIZATION') {
+      if (!targetUrn) {
+        throw new BadRequestException('An organization post requires a valid targetUrn.');
+      }
+      // Extract numeric ID if a full LinkedIn URL or raw digits were provided
+      const urlMatch = targetUrn.match(/(?:company\/|organization:?)(\d+)/i);
+      if (urlMatch) {
+        targetUrn = `urn:li:organization:${urlMatch[1]}`;
+      } else if (/^\d+$/.test(targetUrn)) {
+        targetUrn = `urn:li:organization:${targetUrn}`;
+      }
+      // Validate LinkedIn standard numeric organization URN
+      if (!/^urn:li:organization:\d+$/.test(targetUrn)) {
+        throw new BadRequestException(
+          `Invalid organization target URN "${dto.targetUrn}". LinkedIn requires a numeric organization ID (e.g. urn:li:organization:12345678).`,
+        );
+      }
+    }
+
     const newPost = await this.prisma.scheduledPost.create({
       data: {
         userId: dto.userId,
@@ -54,7 +74,7 @@ export class PostsService {
         scheduledTime: scheduledDate,
         status: PostStatus.PENDING,
         targetType: dto.targetType || 'PERSON',
-        targetUrn: dto.targetUrn || null,
+        targetUrn,
         targetName: dto.targetName || null,
       },
     });
@@ -161,7 +181,7 @@ export class PostsService {
   async retryFailedPost(postId: string, newScheduledTime?: string): Promise<ScheduledPost> {
     const post = await this.prisma.scheduledPost.findUnique({
       where: { id: postId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, targetUrn: true },
     });
 
     if (!post) {

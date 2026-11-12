@@ -26,7 +26,7 @@ export class ScheduledPostResponseDto {
   @ApiPropertyOptional({ example: 'urn:li:organization:12345678' })
   targetUrn?: string | null;
 
-  @ApiPropertyOptional({ example: 'Loadgo' })
+  @ApiPropertyOptional({ example: 'Acme Corp' })
   targetName?: string | null;
 
   @ApiPropertyOptional({ example: 'urn:li:share:7123456789' })

@@ -62,8 +62,8 @@ export class CreateScheduledPostDto {
   targetUrn?: string;
 
   @ApiPropertyOptional({
-    description: 'Target entity display name (e.g., Loadgo or Chandan Shaw)',
-    example: 'Loadgo',
+    description: 'Target entity display name (e.g., Company Page or Member Profile)',
+    example: 'Acme Corp',
   })
   @IsOptional()
   @IsString()

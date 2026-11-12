@@ -416,18 +416,87 @@ export class AuthService {
 
   /**
    * Retrieves organization / company pages that the user can post to.
+   * Discovers organizations from LinkedIn ACL API if accessible, or returns registered organizations.
    */
   async getUserOrganizations(userId: string): Promise<LinkedInOrganizationResponseDto[]> {
     const account = await this.prisma.linkedInAccount.findFirst({
       where: { userId, status: AccountStatus.ACTIVE },
-      select: { id: true, name: true, email: true },
     });
 
     if (!account) {
       return [];
     }
 
-    let stored = await this.prisma.linkedInOrganization.findMany({
+    // Attempt to discover real organizations administered by the member via LinkedIn ACL API
+    try {
+      if (account.accessToken) {
+        const aclRes = await fetch(
+          'https://api.linkedin.com/v2/organizationalEntityAcls?q=roleAssignee&state=APPROVED',
+          {
+            headers: {
+              Authorization: `Bearer ${account.accessToken}`,
+            },
+            signal: AbortSignal.timeout(5000),
+          },
+        );
+
+        if (aclRes.ok) {
+          const aclData = await aclRes.json();
+          const elements = Array.isArray(aclData?.elements) ? aclData.elements : [];
+
+          for (const el of elements) {
+            const orgUrn = el.organizationalTarget; // e.g. "urn:li:organization:12345678"
+            if (orgUrn && typeof orgUrn === 'string' && orgUrn.startsWith('urn:li:organization:')) {
+              const numericId = orgUrn.replace('urn:li:organization:', '');
+              if (/^\d+$/.test(numericId)) {
+                let orgName = `Organization ${numericId}`;
+                let vanityName: string | null = null;
+                try {
+                  const orgRes = await fetch(
+                    `https://api.linkedin.com/v2/organizations/${numericId}`,
+                    {
+                      headers: { Authorization: `Bearer ${account.accessToken}` },
+                      signal: AbortSignal.timeout(4000),
+                    },
+                  );
+                  if (orgRes.ok) {
+                    const orgData = await orgRes.json();
+                    orgName = orgData.localizedName || orgName;
+                    vanityName = orgData.vanityName || null;
+                  }
+                } catch {}
+
+                await this.prisma.linkedInOrganization.upsert({
+                  where: {
+                    accountId_orgUrn: {
+                      accountId: account.id,
+                      orgUrn,
+                    },
+                  },
+                  create: {
+                    accountId: account.id,
+                    orgId: numericId,
+                    orgUrn,
+                    name: orgName,
+                    vanityName,
+                    role: el.role || 'ADMINISTRATOR',
+                  },
+                  update: {
+                    name: orgName,
+                    vanityName,
+                    role: el.role || 'ADMINISTRATOR',
+                  },
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (e: any) {
+      this.logger.debug(`Could not discover organizations via LinkedIn ACL: ${e.message}`);
+    }
+
+    const stored = await this.prisma.linkedInOrganization.findMany({
       where: { accountId: account.id },
       orderBy: { createdAt: 'asc' },
       select: {
@@ -441,36 +510,6 @@ export class AuthService {
       },
     });
 
-    // Auto-provision initial company page if none exists yet
-    if (stored.length === 0) {
-      const isRahul =
-        account.name?.toLowerCase().includes('rahul') ||
-        account.email?.toLowerCase().includes('rahul');
-
-      const initialOrg = isRahul
-        ? {
-            orgId: '144083108',
-            orgUrn: 'urn:li:organization:144083108',
-            name: 'Social Automation Labs',
-            vanityName: 'social-automation-labs',
-          }
-        : {
-            orgId: 'loadgo_logistics',
-            orgUrn: 'urn:li:organization:loadgo',
-            name: 'Loadgo',
-            vanityName: 'loadgo',
-          };
-
-      const created = await this.prisma.linkedInOrganization.create({
-        data: {
-          accountId: account.id,
-          ...initialOrg,
-          role: 'ADMINISTRATOR',
-        },
-      });
-      stored = [created];
-    }
-
     return stored.map((o) => ({
       id: o.orgId,
       urn: o.orgUrn,
@@ -479,70 +518,5 @@ export class AuthService {
       logoUrl: o.logoUrl,
       role: o.role,
     }));
-  }
-
-  /**
-   * Manually adds a company page to the user's active account.
-   */
-  async addCustomOrganization(
-    userId: string,
-    name: string,
-    orgId?: string,
-  ): Promise<LinkedInOrganizationResponseDto> {
-    const account = await this.prisma.linkedInAccount.findFirst({
-      where: { userId, status: AccountStatus.ACTIVE },
-      select: { id: true },
-    });
-    if (!account) {
-      throw new NotFoundException(`No active LinkedIn account found for user ${userId}.`);
-    }
-
-    let pageName = name.trim();
-    let cleanId = (orgId || '').trim();
-
-    // Check if name or orgId is a LinkedIn URL like https://www.linkedin.com/company/144083108/admin/
-    const urlFromId = cleanId.match(/linkedin\.com\/company\/([^\/?#]+)/i);
-    const urlFromName = pageName.match(/linkedin\.com\/company\/([^\/?#]+)/i);
-
-    if (urlFromId) {
-      cleanId = urlFromId[1];
-    } else if (urlFromName) {
-      cleanId = urlFromName[1];
-    }
-
-    if (!cleanId) {
-      cleanId = pageName.toLowerCase().replace(/[^a-z0-9]/g, '');
-    }
-
-    const orgUrn = `urn:li:organization:${cleanId}`;
-
-    const org = await this.prisma.linkedInOrganization.upsert({
-      where: {
-        accountId_orgUrn: {
-          accountId: account.id,
-          orgUrn,
-        },
-      },
-      create: {
-        accountId: account.id,
-        orgId: cleanId,
-        orgUrn,
-        name: pageName,
-        vanityName: cleanId,
-        role: 'ADMINISTRATOR',
-      },
-      update: {
-        name: pageName,
-      },
-    });
-
-    return {
-      id: org.orgId,
-      urn: org.orgUrn,
-      name: org.name,
-      vanityName: org.vanityName,
-      logoUrl: org.logoUrl,
-      role: org.role,
-    };
   }
 }

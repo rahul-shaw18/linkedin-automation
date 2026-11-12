@@ -7,10 +7,10 @@ export class LinkedInOrganizationResponseDto {
   @ApiProperty({ example: 'urn:li:organization:12345678' })
   urn: string;
 
-  @ApiProperty({ example: 'Loadgo' })
+  @ApiProperty({ example: 'Acme Corp' })
   name: string;
 
-  @ApiPropertyOptional({ example: 'loadgo' })
+  @ApiPropertyOptional({ example: 'acme-corp' })
   vanityName?: string | null;
 
   @ApiPropertyOptional({ example: 'https://media.licdn.com/...' })

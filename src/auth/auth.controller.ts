@@ -220,7 +220,7 @@ export class AuthController {
   @Get('organizations/:userId')
   @ApiOperation({
     summary: 'List managed organization/company pages for a user',
-    description: 'Retrieves all LinkedIn company pages (like Loadgo) that the active account can post to.',
+    description: 'Retrieves all LinkedIn company pages that the active account can post to.',
   })
   @ApiResponse({
     status: 200,
@@ -231,23 +231,6 @@ export class AuthController {
     @Param('userId') userId: string,
   ): Promise<LinkedInOrganizationResponseDto[]> {
     return this.authService.getUserOrganizations(userId);
-  }
-
-  @Post('organizations/:userId')
-  @ApiOperation({
-    summary: 'Add or link a company page for testing',
-    description: 'Allows linking an organization page by name and ID.',
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Organization successfully linked',
-    type: LinkedInOrganizationResponseDto,
-  })
-  async addOrganization(
-    @Param('userId') userId: string,
-    @Body() body: { name: string; orgId?: string },
-  ): Promise<LinkedInOrganizationResponseDto> {
-    return this.authService.addCustomOrganization(userId, body.name, body.orgId);
   }
 }
 
