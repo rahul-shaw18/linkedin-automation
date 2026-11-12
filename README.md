@@ -22,52 +22,9 @@ In modern professional life, maintaining a consistent posting schedule on Linked
 
 ---
 
-## 2. Technology Stack & Requirements
-
-### Software Specifications
-* **Frontend:** Angular 22, HTML5, CSS3, Tailwind CSS, TypeScript
-* **Backend:** NestJS 12, Fastify, Node.js runtime
-* **Database:** PostgreSQL (hosted on Supabase Cloud)
-* **ORM:** Prisma ORM 5.x
-* **API Integration:** Official LinkedIn Posts REST API (`/rest/posts`)
-* **Real-Time Communication:** Server-Sent Events (SSE) via RxJS
-* **API Documentation:** OpenAPI / Swagger UI
-
-### Hardware & Environment Requirements
-* **Operating System:** Windows 10/11, Linux (Ubuntu), or macOS
-* **Runtime:** Node.js >= 20.x, npm >= 10.x
-* **Memory:** Minimum 8 GB RAM recommended
-* **Storage:** 20 GB available SSD space
-
----
-
-## 3. System Architecture & Modules
+## 2. System Architecture & Modules
 
 The application is structured into four core modules as defined in the project specification:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Angular Frontend UI                      │
-│     (OAuth Login, Post Composer, Queue & Real-time Stream)   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ HTTP / Cookie Session / SSE
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   NestJS Fastify Backend                     │
-│  ┌───────────────────────┐       ┌───────────────────────┐  │
-│  │ Authentication Module │       │ Post Management Module│  │
-│  └───────────────────────┘       └───────────────────────┘  │
-│  ┌───────────────────────┐       ┌───────────────────────┐  │
-│  │ Scheduler & Dispatch  │       │ Real-Time SSE Events  │  │
-│  └───────────────────────┘       └───────────────────────┘  │
-└──────────────┬───────────────────────────────┬──────────────┘
-               │ Prisma ORM                    │ HTTPS (Bearer)
-               ▼                               ▼
-┌──────────────────────────────┐ ┌────────────────────────────┐
-│ Supabase PostgreSQL Database │ │  LinkedIn REST API Endpoint│
-│ (Accounts, Scheduled Posts)  │ │      (/rest/posts v202610) │
-└──────────────────────────────┘ └────────────────────────────┘
-```
 
 ### Module Breakdown
 1. **Authentication Module (`LinkedInAuthModule`):** Manages user authentication using LinkedIn OAuth 2.0 with state verification. Exchanges authorization codes for access and refresh tokens, maintains user sessions via secure `HttpOnly` cookies, and handles proactive 24-hour token refreshes.
@@ -77,7 +34,7 @@ The application is structured into four core modules as defined in the project s
 
 ---
 
-## 4. Database Schema (Prisma & PostgreSQL)
+## 3. Database Schema (Prisma & PostgreSQL)
 
 The relational database is hosted on **Supabase Cloud** and managed via **Prisma ORM**:
 
@@ -91,7 +48,7 @@ The relational database is hosted on **Supabase Cloud** and managed via **Prisma
 
 ---
 
-## 5. Security Mechanisms
+## 4. Security Mechanisms
 
 * **OAuth 2.0 Protocol:** No user passwords are stored or handled. Authentication is delegated directly to LinkedIn's official OAuth servers with unique state hashes to prevent CSRF.
 * **HttpOnly Session Cookies:** User session identifiers are delivered via `HttpOnly`, `SameSite: Lax` cookies (`la_session`), preventing client-side script access and XSS-based session hijacking.
@@ -101,7 +58,7 @@ The relational database is hosted on **Supabase Cloud** and managed via **Prisma
 
 ---
 
-## 6. Setup & Installation
+## 5. Setup & Installation
 
 ### 1. Clone the Repository
 ```bash
@@ -156,15 +113,7 @@ npm run start:prod
 
 ---
 
-## 7. Future Enhancements
-
-* **Multi-Platform Publishing:** Expanding the dispatch engine to support cross-posting to other social platforms (e.g., X/Twitter, Threads).
-* **Rich Media Attachments:** Uploading images, infographics, and PDF carousels via LinkedIn Media Asset APIs.
-* **AI Content Suggestions:** Integrated hashtag and heading recommendations using AI language models.
-
----
-
-## 8. License & Acknowledgments
+## 6. License & Acknowledgments
 
 This project is developed for academic evaluation as part of the MCA degree program at **Uttaranchal University, Dehradun**.
 
