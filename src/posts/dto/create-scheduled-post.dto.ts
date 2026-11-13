@@ -28,7 +28,7 @@ export class CreateScheduledPostDto {
 
   @ApiProperty({
     description: 'Text commentary content of the LinkedIn post',
-    example: 'Excited to announce our new product release! 🚀 #tech #ai #innovation',
+    example: 'Excited to announce our new product release! #tech #innovation',
     maxLength: 3000,
   })
   @IsString()

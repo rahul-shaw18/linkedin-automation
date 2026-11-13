@@ -89,10 +89,10 @@ async function bootstrap() {
   await app.listen(port, '0.0.0.0');
 
   logger.log(`========================================================`);
-  logger.log(`⚡ LinkedIn Scheduler Engine (Fastify) is running on: http://localhost:${port}`);
-  logger.log(`📚 Swagger API Documentation: http://localhost:${port}/api/docs`);
-  logger.log(`🩺 Health Check Endpoint:     http://localhost:${port}/health`);
-  logger.log(`⏱️ Mode:                      ${nodeEnv}`);
+  logger.log(`LinkedIn Scheduler Engine (Fastify) is running on: http://localhost:${port}`);
+  logger.log(`Swagger API Documentation: http://localhost:${port}/api/docs`);
+  logger.log(`Health Check Endpoint:     http://localhost:${port}/health`);
+  logger.log(`Mode:                      ${nodeEnv}`);
   logger.log(`========================================================`);
 }
 

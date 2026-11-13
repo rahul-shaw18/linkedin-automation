@@ -11,7 +11,7 @@ export class ScheduledPostResponseDto {
   @ApiProperty({ example: '87bfa254-4693-4796-98ec-6e1215104113' })
   accountId: string;
 
-  @ApiProperty({ example: 'Excited to announce our new product release! 🚀' })
+  @ApiProperty({ example: 'Excited to announce our new product release!' })
   content: string;
 
   @ApiProperty({ example: '2026-11-01T15:30:00.000Z' })
