@@ -24,6 +24,7 @@ export interface LinkedInUserInfo {
 export interface LinkedInOrganizationDetail {
   name: string;
   vanityName: string | null;
+  logoUrl?: string | null;
 }
 
 @Injectable()
@@ -100,60 +101,36 @@ export class LinkedInApiClient {
   }
 
   async fetchUserInfo(accessToken: string): Promise<LinkedInUserInfo> {
-    let linkedInId: string | undefined;
-    let memberName: string | undefined;
-    let memberEmail: string | undefined;
-    let memberPicture: string | undefined;
-
     try {
-      const userinfoRes = await fetch('https://api.linkedin.com/v2/userinfo', {
+      const response = await fetch('https://api.linkedin.com/v2/userinfo', {
         headers: { Authorization: `Bearer ${accessToken}` },
         signal: AbortSignal.timeout(10000),
       });
 
-      if (userinfoRes.ok) {
-        const data = await userinfoRes.json();
-        linkedInId = data.sub || data.id;
-        memberName =
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const linkedInId = data.sub || data.id;
+
+      if (!linkedInId) {
+        throw new Error('User identifier missing from response');
+      }
+
+      return {
+        id: linkedInId,
+        name:
           data.name ||
           `${data.given_name || ''} ${data.family_name || ''}`.trim() ||
-          undefined;
-        memberEmail = data.email || undefined;
-        memberPicture = data.picture || undefined;
-      }
-    } catch (err: any) {
-      this.logger.warn(`Could not fetch profile via /v2/userinfo: ${err.message}`);
+          undefined,
+        email: data.email || undefined,
+        picture: data.picture || undefined,
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to fetch LinkedIn user info: ${error.message}`);
+      throw new BadRequestException(`Could not retrieve LinkedIn profile: ${error.message}`);
     }
-
-    if (!linkedInId) {
-      try {
-        const meRes = await fetch('https://api.linkedin.com/v2/me', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          signal: AbortSignal.timeout(10000),
-        });
-
-        if (meRes.ok) {
-          const meData = await meRes.json();
-          linkedInId = meData.id;
-          if (!memberName && (meData.localizedFirstName || meData.localizedLastName)) {
-            memberName = `${meData.localizedFirstName || ''} ${meData.localizedLastName || ''}`.trim();
-          }
-        }
-      } catch (err: any) {
-        this.logger.warn(`Could not fetch profile via /v2/me: ${err.message}`);
-      }
-    }
-
-    if (!linkedInId) {
-      throw new BadRequestException('Could not determine LinkedIn member identifier.');
-    }
-
-    return {
-      id: linkedInId,
-      name: memberName,
-      email: memberEmail,
-      picture: memberPicture,
-    };
   }
 
   async refreshAccessToken(refreshToken: string): Promise<LinkedInTokenResponse> {

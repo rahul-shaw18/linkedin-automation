@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LinkedInAccount } from '@prisma/client';
-import { extractOrganizationId } from '../common/utils/linkedin.util';
 
 export interface PublishResult {
   postId: string;
@@ -71,46 +70,15 @@ export class LinkedInPostService {
           responseBody?.description ||
           `HTTP Error ${status}`;
 
-        this.logger.error(
-          `Failed to publish post to LinkedIn (HTTP ${status}): ${linkedinMessage}. Full response: ${JSON.stringify(
-            responseBody,
-          )}`,
-        );
-
-        if (
-          authorUrn.startsWith('urn:li:organization:') &&
-          (status === 400 || status === 401 || status === 403 || status === 422)
-        ) {
-          const allowSimulated =
-            this.configService.get<string>('ALLOW_SIMULATED_ORG_POST') === 'true';
-
-          if (allowSimulated) {
-            const orgCleanId = extractOrganizationId(authorUrn) || 'org';
-            const simulatedUrn = `urn:li:share:org-${orgCleanId}-${Date.now()}`;
-            this.logger.log(
-              `ALLOW_SIMULATED_ORG_POST is enabled. Recording simulated company page post for ${authorUrn}: ${simulatedUrn}`,
-            );
-            return {
-              postId: simulatedUrn,
-              responseData: {
-                simulatedUrn,
-                note: 'Simulated Company Page publication',
-              },
-            };
-          }
-
-          throw new BadRequestException(
-            linkedinMessage,
-          );
-        }
+        this.logger.error(`LinkedIn API returned error (HTTP ${status}): ${linkedinMessage}`);
 
         if (status === 401 || status === 403) {
           throw new BadRequestException(
-            `LinkedIn authorization denied (${status}): ${linkedinMessage}. Please check permissions (w_member_social or w_organization_social).`,
+            `LinkedIn authorization denied (${status}): ${linkedinMessage}. Please check account permissions.`,
           );
         }
 
-        if (status === 400) {
+        if (status === 400 || status === 422) {
           throw new BadRequestException(linkedinMessage);
         }
 

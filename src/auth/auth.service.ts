@@ -217,6 +217,12 @@ export class AuthService {
           numericId,
         );
 
+        const logoUrl =
+          details.logoUrl ||
+          (details.vanityName?.toLowerCase() === 'loadgo' || details.name?.toLowerCase().includes('loadgo')
+            ? 'https://loadgo.in/web-app-manifest-512x512.png'
+            : null);
+
         await this.prisma.linkedInOrganization.upsert({
           where: {
             accountId_orgUrn: {
@@ -230,11 +236,13 @@ export class AuthService {
             orgUrn: `urn:li:organization:${numericId}`,
             name: details.name,
             vanityName: details.vanityName,
+            logoUrl: logoUrl,
             role: 'ADMINISTRATOR',
           },
           update: {
             name: details.name,
             vanityName: details.vanityName,
+            ...(logoUrl ? { logoUrl } : {}),
             role: 'ADMINISTRATOR',
           },
         });

@@ -4,31 +4,21 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { NestFastifyApplication, FastifyAdapter } from '@nestjs/platform-fastify';
 import fastifyCookie from '@fastify/cookie';
-import fastifyCompress from '@fastify/compress';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-
-  const adapter = new FastifyAdapter({
-    trustProxy: true,
-    bodyLimit: 1048576,
-    keepAliveTimeout: 65000,
-  });
-
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter);
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter(),
+  );
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') || 3000;
   const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
   const frontendUrl = configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
-
-  await app.register(fastifyCompress, {
-    encodings: ['gzip', 'deflate'],
-    threshold: 1024,
-  });
 
   await app.register(fastifyCookie);
 
@@ -36,7 +26,7 @@ async function bootstrap() {
     origin: [frontendUrl, 'http://localhost:4200', 'http://127.0.0.1:4200'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Cron-Secret', 'Cookie'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
   });
 
   app.enableShutdownHooks();
@@ -63,21 +53,11 @@ async function bootstrap() {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('LinkedIn Post Scheduler & Automation Engine')
     .setDescription(
-      'REST API powered by Fastify, integrated with Supabase (PostgreSQL) and Prisma ORM for managing LinkedIn OAuth 2.0 tokens, scheduling posts, and executing automated publishing.',
+      'REST API powered by Fastify and Prisma ORM for managing LinkedIn OAuth 2.0 tokens, composing posts, and executing scheduled publishing.',
     )
     .setVersion('1.0.0')
-    .addApiKey(
-      {
-        type: 'apiKey',
-        name: 'X-Cron-Secret',
-        in: 'header',
-        description: 'Secret key for authenticating scheduler heartbeat/webhook triggers',
-      },
-      'X-Cron-Secret',
-    )
     .addTag('LinkedIn Auth', 'OAuth 2.0 flow, token exchange, and account status')
     .addTag('LinkedIn Scheduled Posts', 'Post scheduling, user post listings, cancellation, and retries')
-    .addTag('Scheduler & Triggers', 'Cron task automation and manual heartbeat triggers')
     .addTag('System & Health', 'Uptime monitoring and system health checks')
     .build();
 
@@ -97,4 +77,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-

@@ -5,7 +5,6 @@ import { AuthService } from '../auth/auth.service';
 import { LinkedInPostService } from '../linkedin/linkedin-post.service';
 import { SseEventsService } from '../events/sse-events.service';
 import { PostStatus } from '@prisma/client';
-import { TriggerExecutionResultDto } from './dto/trigger-response.dto';
 
 @Injectable()
 export class PostSchedulerService {
@@ -21,123 +20,67 @@ export class PostSchedulerService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleCron(): Promise<void> {
-    this.logger.debug('Cron tick: Checking for pending scheduled LinkedIn posts...');
-    try {
-      await this.executeScheduledPosts();
-    } catch (error: any) {
-      if (
-        error.message?.includes('Can\'t reach database server') ||
-        error.message?.includes('tenant/user') ||
-        error.name === 'PrismaClientInitializationError'
-      ) {
-        this.logger.warn(
-          'Database is currently unreachable. Skipping scheduler cycle until restored.',
-        );
-      } else {
-        this.logger.error('Unhandled error during cron post execution:', error.stack);
-      }
-    }
-  }
-
-  async executeScheduledPosts(): Promise<TriggerExecutionResultDto> {
     if (this.isRunning) {
-      this.logger.warn('Previous scheduler execution is still in progress. Skipping this cycle.');
-      return {
-        totalFound: 0,
-        published: 0,
-        failed: 0,
-        skipped: 0,
-        details: [],
-        executedAt: new Date().toISOString(),
-      };
-    }
-
-    this.isRunning = true;
-    const now = new Date();
-
-    const summary: TriggerExecutionResultDto = {
-      totalFound: 0,
-      published: 0,
-      failed: 0,
-      skipped: 0,
-      details: [],
-      executedAt: now.toISOString(),
-    };
-
-    try {
-      const pendingPosts = await this.prisma.scheduledPost.findMany({
-        where: {
-          status: PostStatus.PENDING,
-          scheduledTime: {
-            lte: now,
-          },
-        },
-        include: {
-          account: true,
-        },
-        orderBy: {
-          scheduledTime: 'asc',
-        },
-        take: 50,
-      });
-
-      summary.totalFound = pendingPosts.length;
-
-      if (pendingPosts.length === 0) {
-        return summary;
-      }
-
-      this.logger.log(`Found ${pendingPosts.length} post(s) due for publishing.`);
-
-      const CONCURRENCY_LIMIT = 5;
-      for (let i = 0; i < pendingPosts.length; i += CONCURRENCY_LIMIT) {
-        const chunk = pendingPosts.slice(i, i + CONCURRENCY_LIMIT);
-        await Promise.allSettled(chunk.map((post) => this.processSinglePost(post, summary)));
-      }
-    } finally {
-      this.isRunning = false;
-    }
-
-    return summary;
-  }
-
-  private async processSinglePost(
-    post: any,
-    summary: TriggerExecutionResultDto,
-  ): Promise<void> {
-    const lockResult = await this.prisma.scheduledPost.updateMany({
-      where: {
-        id: post.id,
-        status: PostStatus.PENDING,
-      },
-      data: {
-        status: PostStatus.PROCESSING,
-      },
-    });
-
-    if (lockResult.count === 0) {
-      this.logger.warn(`Post ${post.id} was already claimed by another worker. Skipping.`);
-      summary.skipped++;
       return;
     }
 
-    this.sseEventsService?.emitPostEvent({
+    this.isRunning = true;
+    try {
+      await this.publishDuePosts();
+    } catch (error: any) {
+      this.logger.error(`Error in scheduled posts check: ${error.message}`);
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  private async publishDuePosts(): Promise<void> {
+    const duePosts = await this.prisma.scheduledPost.findMany({
+      where: {
+        status: PostStatus.PENDING,
+        scheduledTime: {
+          lte: new Date(),
+        },
+      },
+      include: {
+        account: true,
+      },
+      orderBy: {
+        scheduledTime: 'asc',
+      },
+    });
+
+    if (duePosts.length === 0) {
+      return;
+    }
+
+    this.logger.log(`Found ${duePosts.length} post(s) due for publishing.`);
+
+    for (const post of duePosts) {
+      await this.processSinglePost(post);
+    }
+  }
+
+  private async processSinglePost(post: any): Promise<void> {
+    await this.prisma.scheduledPost.update({
+      where: { id: post.id },
+      data: { status: PostStatus.PROCESSING },
+    });
+
+    this.sseEventsService.emitPostEvent({
       userId: post.userId,
       type: 'POST_PROCESSING',
       post,
     });
 
     try {
-      this.logger.log(
-        `Processing post id=${post.id} for user=${post.userId}, account=${post.accountId}`,
-      );
+      this.logger.log(`Publishing post ${post.id} for user ${post.userId}`);
 
-      const validAccessToken = await this.authService.getValidAccessToken(post.account);
-
-      const publishResult = await this.linkedInPostService.publishPostToLinkedIn(
+      const accessToken = await this.authService.getValidAccessToken(post.account);
+      const result = await this.linkedInPostService.publishPostToLinkedIn(
         post.account,
         post.content,
-        validAccessToken,
+        accessToken,
         post.targetUrn,
       );
 
@@ -145,52 +88,35 @@ export class PostSchedulerService {
         where: { id: post.id },
         data: {
           status: PostStatus.PUBLISHED,
-          linkedInPostId: publishResult.postId,
+          linkedInPostId: result.postId,
           failureReason: null,
         },
       });
 
-      this.logger.log(
-        `Post ${post.id} successfully published. LinkedIn Post ID: ${publishResult.postId}`,
-      );
-
-      this.sseEventsService?.emitPostEvent({
+      this.sseEventsService.emitPostEvent({
         userId: post.userId,
         type: 'POST_PUBLISHED',
         post: publishedPost,
       });
 
-      summary.published++;
-      summary.details.push({
-        id: post.id,
-        status: PostStatus.PUBLISHED,
-        postId: publishResult.postId,
-      });
-    } catch (error) {
-      const failureReason = error.message || 'Unknown publishing error occurred';
-      this.logger.error(`Failed to publish post ${post.id}: ${failureReason}`, error.stack);
+      this.logger.log(`Post ${post.id} published successfully. ID: ${result.postId}`);
+    } catch (error: any) {
+      const reason = error.message || 'Unknown publishing error';
+      this.logger.error(`Failed to publish post ${post.id}: ${reason}`);
 
       const failedPost = await this.prisma.scheduledPost.update({
         where: { id: post.id },
         data: {
           status: PostStatus.FAILED,
-          failureReason: failureReason.substring(0, 1000),
+          failureReason: reason.substring(0, 1000),
         },
       });
 
-      this.sseEventsService?.emitPostEvent({
+      this.sseEventsService.emitPostEvent({
         userId: post.userId,
         type: 'POST_FAILED',
         post: failedPost,
       });
-
-      summary.failed++;
-      summary.details.push({
-        id: post.id,
-        status: PostStatus.FAILED,
-        reason: failureReason,
-      });
     }
   }
 }
-
