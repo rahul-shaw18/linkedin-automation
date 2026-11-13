@@ -1,13 +1,4 @@
 # LinkedIn Automation
-
-### Master of Computer Applications (MCA) Capstone Project
-**Submitted to:** Uttaranchal University, Dehradun  
-**Student Name:** Rahul Kumar Shaw  
-**Learner ID:** 2426010028  
-**Project Guide:** Mr. Anshuman Sahu (Manager, Indxx, Gurugram)  
-
----
-
 ## 1. Project Overview & Objectives
 
 In modern professional life, maintaining a consistent posting schedule on LinkedIn is essential for career development and technical networking. However, students and working professionals frequently struggle with consistency due to academic pressure, work commitments, and project deadlines.
