@@ -14,9 +14,6 @@ export class PostsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Module D.1: Create a new scheduled post
-   */
   async createScheduledPost(dto: CreateScheduledPostDto): Promise<ScheduledPost> {
     const scheduledDate = new Date(dto.scheduledTime);
 
@@ -24,7 +21,6 @@ export class PostsService {
       throw new BadRequestException('Invalid scheduledTime timestamp provided.');
     }
 
-    // Verify LinkedIn account exists and is active (selecting minimal fields to avoid over-fetching tokens)
     const account = await this.prisma.linkedInAccount.findUnique({
       where: { id: dto.accountId },
       select: { id: true, userId: true, status: true },
@@ -51,14 +47,12 @@ export class PostsService {
       if (!targetUrn) {
         throw new BadRequestException('An organization post requires a valid targetUrn.');
       }
-      // Extract numeric ID if a full LinkedIn URL or raw digits were provided
       const urlMatch = targetUrn.match(/(?:company\/|organization:?)(\d+)/i);
       if (urlMatch) {
         targetUrn = `urn:li:organization:${urlMatch[1]}`;
       } else if (/^\d+$/.test(targetUrn)) {
         targetUrn = `urn:li:organization:${targetUrn}`;
       }
-      // Validate LinkedIn standard numeric organization URN
       if (!/^urn:li:organization:\d+$/.test(targetUrn)) {
         throw new BadRequestException(
           `Invalid organization target URN "${dto.targetUrn}". LinkedIn requires a numeric organization ID (e.g. urn:li:organization:12345678).`,
@@ -86,9 +80,6 @@ export class PostsService {
     return newPost;
   }
 
-  /**
-   * Module D.2: Retrieve posts for a user with status details and pagination
-   */
   async getUserPosts(
     userId: string,
     limit: number = 50,
@@ -116,9 +107,6 @@ export class PostsService {
     });
   }
 
-  /**
-   * Retrieve single post details
-   */
   async getPostById(postId: string): Promise<ScheduledPost> {
     const post = await this.prisma.scheduledPost.findUnique({
       where: { id: postId },
@@ -142,9 +130,6 @@ export class PostsService {
     return post;
   }
 
-  /**
-   * Module D.3: Cancel/delete a pending post
-   */
   async cancelScheduledPost(postId: string): Promise<{ success: boolean; message: string }> {
     const post = await this.prisma.scheduledPost.findUnique({
       where: { id: postId },
@@ -175,9 +160,6 @@ export class PostsService {
     };
   }
 
-  /**
-   * Retry a failed post by rescheduling it
-   */
   async retryFailedPost(postId: string, newScheduledTime?: string): Promise<ScheduledPost> {
     const post = await this.prisma.scheduledPost.findUnique({
       where: { id: postId },

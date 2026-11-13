@@ -31,7 +31,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = exceptionResponse;
       }
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
-      // Handle known Prisma DB errors
       switch (exception.code) {
         case 'P2002': {
           status = HttpStatus.CONFLICT;

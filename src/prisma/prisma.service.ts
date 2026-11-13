@@ -20,7 +20,6 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       this.logger.log('Successfully connected to database via Prisma ORM.');
     } catch (error) {
       this.logger.error('Database connection error in PrismaService:', error.message);
-      // We do not exit process immediately to allow graceful container restarts or serverless warmups
     }
   }
 

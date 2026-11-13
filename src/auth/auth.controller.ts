@@ -79,21 +79,18 @@ export class AuthController {
         if (decoded.userId) {
           userId = decoded.userId;
         }
-      } catch {
-        // Fallback to default
-      }
+      } catch {}
     }
 
     try {
       const account = await this.authService.handleOAuthCallback(code, userId);
       const isProd = this.configService.get<string>('NODE_ENV') === 'production';
 
-      // Set secure HttpOnly session cookie via Fastify
       reply.setCookie('la_session', account.userId, {
         httpOnly: true,
         secure: isProd,
         sameSite: 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: 30 * 24 * 60 * 60 * 1000,
         path: '/',
       });
 

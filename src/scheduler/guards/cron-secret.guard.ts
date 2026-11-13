@@ -29,7 +29,6 @@ export class CronSecretGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
 
-    // Lazily re-verify secret buffer if environment changed or delayed config injection
     if (!this.expectedSecret || !this.expectedBuffer) {
       this.initSecret();
       if (!this.expectedSecret || !this.expectedBuffer) {
@@ -54,7 +53,6 @@ export class CronSecretGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or missing X-Cron-Secret authentication header.');
     }
 
-    // Constant-time buffer comparison to prevent timing side-channel attacks
     const providedBuffer = Buffer.from(providedSecret);
 
     const isMatch =

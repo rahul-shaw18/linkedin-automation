@@ -21,7 +21,6 @@ export class LoggingInterceptor implements NestInterceptor {
     const method = req.method;
     const url = req.url;
 
-    // Suppress high-frequency health-check pings to reduce stdout I/O overhead
     if (url === '/health' || url.startsWith('/health?')) {
       return next.handle();
     }

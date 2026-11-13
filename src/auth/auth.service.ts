@@ -38,9 +38,6 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
-  /**
-   * Generates LinkedIn OAuth 2.0 Authorization URL for initiating user login.
-   */
   getAuthorizationUrl(userId: string, customRedirectUri?: string): { url: string; state: string } {
     const clientId = this.configService.get<string>('LINKEDIN_CLIENT_ID');
     const redirectUri =
@@ -55,7 +52,6 @@ export class AuthService {
       );
     }
 
-    // State encodes the userId and a random salt to prevent CSRF
     const statePayload = Buffer.from(
       JSON.stringify({ userId, timestamp: Date.now() }),
     ).toString('base64url');
@@ -72,9 +68,6 @@ export class AuthService {
     return { url, state: statePayload };
   }
 
-  /**
-   * Exchanges auth code for access & refresh tokens, fetches userinfo, and upserts LinkedInAccount.
-   */
   async handleOAuthCallback(
     code: string,
     userId: string,
@@ -93,7 +86,6 @@ export class AuthService {
 
     this.logger.log(`Exchanging authorization code for userId=${userId}`);
 
-    // 1. Request access & refresh tokens from LinkedIn
     let tokenData: LinkedInTokenResponse;
     try {
       const tokenBody = new URLSearchParams({
@@ -110,7 +102,7 @@ export class AuthService {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: tokenBody.toString(),
-        signal: AbortSignal.timeout(10000), // 10s timeout to prevent hanging connections
+        signal: AbortSignal.timeout(10000),
       });
 
       const responseJson = await tokenResponse.json();
@@ -129,7 +121,6 @@ export class AuthService {
       throw new BadRequestException(`Failed to exchange LinkedIn authorization code: ${error.message}`);
     }
 
-    // 2. Fetch LinkedIn userinfo (OpenID Connect /v2/userinfo endpoint)
     let linkedInId: string;
     let memberName: string | undefined;
     let memberEmail: string | undefined;
@@ -140,7 +131,7 @@ export class AuthService {
         headers: {
           Authorization: `Bearer ${tokenData.access_token}`,
         },
-        signal: AbortSignal.timeout(10000), // 10s timeout
+        signal: AbortSignal.timeout(10000),
       });
 
       if (userinfoResponse.ok) {
@@ -159,7 +150,6 @@ export class AuthService {
       );
     }
 
-    // Fallback to /v2/me if /v2/userinfo did not resolve
     if (!linkedInId) {
       try {
         const meResponse = await fetch('https://api.linkedin.com/v2/me', {
@@ -186,14 +176,12 @@ export class AuthService {
       throw new BadRequestException('Could not determine LinkedIn member identifier.');
     }
 
-    // 3. Calculate token expiration timestamp
     const tokenExpiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
 
     this.logger.log(
       `LinkedIn account connected: userId=${userId}, linkedInId=${linkedInId}, name=${memberName || 'N/A'}, expiresAt=${tokenExpiresAt.toISOString()}`,
     );
 
-    // 4. Upsert record in LinkedInAccount table
     const account = await this.prisma.linkedInAccount.upsert({
       where: {
         userId_linkedInId: {
@@ -226,10 +214,6 @@ export class AuthService {
     return account;
   }
 
-  /**
-   * Retrieves a valid LinkedIn access token for an account, refreshing if expired.
-   * Accepts either an account ID string or an existing LinkedInAccount object to prevent N+1 queries.
-   */
   async getValidAccessToken(accountOrId: string | LinkedInAccount): Promise<string> {
     const account =
       typeof accountOrId === 'string'
@@ -259,14 +243,12 @@ export class AuthService {
 
     const now = Date.now();
     const expiresAt = new Date(account.tokenExpiresAt).getTime();
-    const bufferMs = 24 * 60 * 60 * 1000; // 24 hours buffer
+    const bufferMs = 24 * 60 * 60 * 1000;
 
-    // Token is still valid with > 24 hours remaining (Zero DB queries if pre-fetched)
     if (now < expiresAt - bufferMs) {
       return account.accessToken;
     }
 
-    // Token has expired or is expiring soon - check for refresh token
     if (!account.refreshToken) {
       if (now >= expiresAt) {
         await this.prisma.linkedInAccount.update({
@@ -283,7 +265,6 @@ export class AuthService {
       return account.accessToken;
     }
 
-    // Refresh the access token using LinkedIn OAuth endpoint
     const clientId = this.configService.get<string>('LINKEDIN_CLIENT_ID');
     const clientSecret = this.configService.get<string>('LINKEDIN_CLIENT_SECRET');
 
@@ -301,7 +282,7 @@ export class AuthService {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: refreshParams.toString(),
-        signal: AbortSignal.timeout(10000), // 10s timeout
+        signal: AbortSignal.timeout(10000),
       });
 
       const refreshed = (await refreshResponse.json()) as LinkedInTokenResponse;
@@ -337,7 +318,6 @@ export class AuthService {
         error.stack,
       );
 
-      // If already expired, mark status as EXPIRED
       if (now >= expiresAt) {
         await this.prisma.linkedInAccount.update({
           where: { id: account.id },
@@ -348,15 +328,11 @@ export class AuthService {
         );
       }
 
-      // If not yet expired, return current token as fallback
       this.logger.warn(`Refresh failed but existing token is still valid. Using current token.`);
       return account.accessToken;
     }
   }
 
-  /**
-   * Retrieves all LinkedIn accounts connected to a user (excluding raw access/refresh tokens to minimize payload size).
-   */
   async getUserAccounts(userId: string): Promise<LinkedInAccount[]> {
     return this.prisma.linkedInAccount.findMany({
       where: { userId },
@@ -384,7 +360,6 @@ export class AuthService {
       throw new NotFoundException(`LinkedIn account ${accountId} not found.`);
     }
 
-    // Attempt to revoke the access token from LinkedIn so app authorization is revoked
     try {
       const clientId = this.configService.get<string>('LINKEDIN_CLIENT_ID');
       const clientSecret = this.configService.get<string>('LINKEDIN_CLIENT_SECRET');
@@ -397,7 +372,7 @@ export class AuthService {
             client_secret: clientSecret,
             token: account.accessToken,
           }).toString(),
-          signal: AbortSignal.timeout(5000), // 5s timeout
+          signal: AbortSignal.timeout(5000),
         });
       }
     } catch (err: any) {
@@ -414,10 +389,6 @@ export class AuthService {
     });
   }
 
-  /**
-   * Retrieves organization / company pages that the user can post to.
-   * Discovers organizations from LinkedIn ACL API if accessible, or returns registered organizations.
-   */
   async getUserOrganizations(userId: string): Promise<LinkedInOrganizationResponseDto[]> {
     const account = await this.prisma.linkedInAccount.findFirst({
       where: { userId, status: AccountStatus.ACTIVE },
@@ -427,7 +398,6 @@ export class AuthService {
       return [];
     }
 
-    // Attempt to discover real organizations administered by the member via LinkedIn ACL API
     try {
       if (account.accessToken) {
         const aclRes = await fetch(
@@ -445,7 +415,7 @@ export class AuthService {
           const elements = Array.isArray(aclData?.elements) ? aclData.elements : [];
 
           for (const el of elements) {
-            const orgUrn = el.organizationalTarget; // e.g. "urn:li:organization:12345678"
+            const orgUrn = el.organizationalTarget;
             if (orgUrn && typeof orgUrn === 'string' && orgUrn.startsWith('urn:li:organization:')) {
               const numericId = orgUrn.replace('urn:li:organization:', '');
               if (/^\d+$/.test(numericId)) {

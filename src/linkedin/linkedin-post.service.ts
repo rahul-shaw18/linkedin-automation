@@ -18,9 +18,6 @@ export class LinkedInPostService {
 
   constructor(private readonly configService: ConfigService) {}
 
-  /**
-   * Publishes commentary content to the user's LinkedIn profile feed via LinkedIn Posts API (/rest/posts).
-   */
   async publishPostToLinkedIn(
     account: LinkedInAccount,
     content: string,
@@ -60,7 +57,7 @@ export class LinkedInPostService {
         method: 'POST',
         headers,
         body: JSON.stringify(postPayload),
-        signal: AbortSignal.timeout(15000), // Fail-fast with 15s timeout to prevent thread and socket hangs
+        signal: AbortSignal.timeout(15000),
       });
 
       const responseBody = await response.json().catch(() => ({}));
@@ -79,7 +76,6 @@ export class LinkedInPostService {
           )}`,
         );
 
-        // LinkedIn strictly requires w_organization_social (Community Management API) to post on behalf of an organization.
         if (
           authorUrn.startsWith('urn:li:organization:') &&
           (status === 400 || status === 401 || status === 403 || status === 422)
@@ -97,7 +93,7 @@ export class LinkedInPostService {
               postId: simulatedUrn,
               responseData: {
                 simulatedUrn,
-                note: 'Simulated Company Page publication (LinkedIn requires isolated dedicated developer app for live Community Management API)',
+                note: 'Simulated Company Page publication',
               },
             };
           }
@@ -128,7 +124,6 @@ export class LinkedInPostService {
         );
       }
 
-      // LinkedIn Posts API returns the created Post URN in the 'x-restli-id' response header
       const restliId =
         response.headers.get('x-restli-id') ||
         response.headers.get('x-linkedin-id') ||

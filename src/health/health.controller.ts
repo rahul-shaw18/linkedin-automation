@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class HealthController {
   private lastDbCheckTime = 0;
   private cachedDbStatus = 'unknown';
-  private readonly DB_CACHE_TTL_MS = 5000; // 5-second TTL prevents DB connection pool exhaustion from high-frequency uptime probes
+  private readonly DB_CACHE_TTL_MS = 5000;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -25,7 +25,6 @@ export class HealthController {
     const now = Date.now();
     let databaseStatus = this.cachedDbStatus;
 
-    // Refresh DB health status only when the cached value has expired
     if (now - this.lastDbCheckTime > this.DB_CACHE_TTL_MS) {
       try {
         await this.prisma.$queryRaw`SELECT 1`;

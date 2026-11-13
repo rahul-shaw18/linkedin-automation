@@ -13,9 +13,6 @@ export interface PostEventPayload {
 export class SseEventsService {
   private readonly postEvents$ = new Subject<PostEventPayload>();
 
-  /**
-   * Emits a real-time post lifecycle event to connected SSE clients.
-   */
   emitPostEvent(payload: Omit<PostEventPayload, 'timestamp'>): void {
     this.postEvents$.next({
       ...payload,
@@ -23,11 +20,6 @@ export class SseEventsService {
     });
   }
 
-  /**
-   * Returns a filtered Observable stream for a specific user's SSE connection.
-   * Merges a 25-second keepalive heartbeat to prevent reverse proxies and Render load balancers
-   * from dropping idle HTTP streaming connections.
-   */
   getUserStream(userId: string): Observable<MessageEvent> {
     const userEvents$ = this.postEvents$.pipe(
       filter((e) => !userId || e.userId === userId || userId === 'ALL'),
