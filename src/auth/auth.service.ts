@@ -7,8 +7,6 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { LinkedInApiClient } from './linkedin-api.client';
 import { AccountStatus, LinkedInAccount } from '@prisma/client';
-import { LinkedInOrganizationResponseDto } from './dto/linkedin-organization-response.dto';
-import { extractOrganizationId } from '../common/utils/linkedin.util';
 
 @Injectable()
 export class AuthService {
@@ -34,38 +32,61 @@ export class AuthService {
     const userInfo = await this.linkedInApi.fetchUserInfo(tokenData.access_token);
     const tokenExpiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
 
-    this.logger.log(
-      `LinkedIn account connected: userId=${userId}, linkedInId=${userInfo.id}, name=${userInfo.name || 'N/A'}`,
-    );
+    // Look for an existing account registered for this permanent LinkedIn member
+    const existingAccount = await this.prisma.linkedInAccount.findFirst({
+      where: { linkedInId: userInfo.id },
+      orderBy: { createdAt: 'asc' },
+    });
 
-    return this.prisma.linkedInAccount.upsert({
-      where: {
-        userId_linkedInId: {
-          userId,
-          linkedInId: userInfo.id,
+    const targetUserId = existingAccount?.userId || userInfo.id;
+    const targetAccountId = existingAccount?.id;
+
+    let account: LinkedInAccount;
+    if (targetAccountId) {
+      account = await this.prisma.linkedInAccount.update({
+        where: { id: targetAccountId },
+        data: {
+          status: AccountStatus.ACTIVE,
+          accessToken: tokenData.access_token,
+          refreshToken: tokenData.refresh_token ?? undefined,
+          tokenExpiresAt,
+          name: userInfo.name ?? undefined,
+          email: userInfo.email ?? undefined,
+          pictureUrl: userInfo.picture ?? undefined,
         },
+      });
+    } else {
+      account = await this.prisma.linkedInAccount.create({
+        data: {
+          userId: targetUserId,
+          linkedInId: userInfo.id,
+          name: userInfo.name ?? null,
+          email: userInfo.email ?? null,
+          pictureUrl: userInfo.picture ?? null,
+          accessToken: tokenData.access_token,
+          refreshToken: tokenData.refresh_token ?? null,
+          tokenExpiresAt,
+          status: AccountStatus.ACTIVE,
+        },
+      });
+    }
+
+    // Consolidate past posts for this member to the canonical userId and account
+    await this.prisma.scheduledPost.updateMany({
+      where: {
+        account: { linkedInId: userInfo.id },
       },
-      create: {
-        userId,
-        linkedInId: userInfo.id,
-        name: userInfo.name ?? null,
-        email: userInfo.email ?? null,
-        pictureUrl: userInfo.picture ?? null,
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token ?? null,
-        tokenExpiresAt,
-        status: AccountStatus.ACTIVE,
-      },
-      update: {
-        name: userInfo.name ?? undefined,
-        email: userInfo.email ?? undefined,
-        pictureUrl: userInfo.picture ?? undefined,
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token ?? undefined,
-        tokenExpiresAt,
-        status: AccountStatus.ACTIVE,
+      data: {
+        userId: targetUserId,
+        accountId: account.id,
       },
     });
+
+    this.logger.log(
+      `LinkedIn account connected: userId=${account.userId}, accountId=${account.id}, linkedInId=${userInfo.id}, name=${userInfo.name || 'N/A'}`,
+    );
+
+    return account;
   }
 
   async getValidAccessToken(accountOrId: string | LinkedInAccount): Promise<string> {
@@ -161,7 +182,12 @@ export class AuthService {
 
   async getUserAccounts(userId: string): Promise<LinkedInAccount[]> {
     return this.prisma.linkedInAccount.findMany({
-      where: { userId },
+      where: {
+        OR: [
+          { userId },
+          { linkedInId: userId },
+        ],
+      },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -196,80 +222,5 @@ export class AuthService {
         refreshToken: null,
       },
     });
-  }
-
-  async getUserOrganizations(userId: string): Promise<LinkedInOrganizationResponseDto[]> {
-    const account = await this.prisma.linkedInAccount.findFirst({
-      where: { userId, status: AccountStatus.ACTIVE },
-    });
-
-    if (!account || !account.accessToken) {
-      return [];
-    }
-
-    const orgUrns = await this.linkedInApi.fetchOrganizationAcls(account.accessToken);
-
-    for (const orgUrn of orgUrns) {
-      const numericId = extractOrganizationId(orgUrn);
-      if (numericId) {
-        const details = await this.linkedInApi.fetchOrganizationDetails(
-          account.accessToken,
-          numericId,
-        );
-
-        const logoUrl =
-          details.logoUrl ||
-          (details.vanityName?.toLowerCase() === 'loadgo' || details.name?.toLowerCase().includes('loadgo')
-            ? 'https://loadgo.in/web-app-manifest-512x512.png'
-            : null);
-
-        await this.prisma.linkedInOrganization.upsert({
-          where: {
-            accountId_orgUrn: {
-              accountId: account.id,
-              orgUrn: `urn:li:organization:${numericId}`,
-            },
-          },
-          create: {
-            accountId: account.id,
-            orgId: numericId,
-            orgUrn: `urn:li:organization:${numericId}`,
-            name: details.name,
-            vanityName: details.vanityName,
-            logoUrl: logoUrl,
-            role: 'ADMINISTRATOR',
-          },
-          update: {
-            name: details.name,
-            vanityName: details.vanityName,
-            ...(logoUrl ? { logoUrl } : {}),
-            role: 'ADMINISTRATOR',
-          },
-        });
-      }
-    }
-
-    const stored = await this.prisma.linkedInOrganization.findMany({
-      where: { accountId: account.id },
-      orderBy: { createdAt: 'asc' },
-      select: {
-        id: true,
-        orgId: true,
-        orgUrn: true,
-        name: true,
-        vanityName: true,
-        logoUrl: true,
-        role: true,
-      },
-    });
-
-    return stored.map((o) => ({
-      id: o.orgId,
-      urn: o.orgUrn,
-      name: o.name,
-      vanityName: o.vanityName,
-      logoUrl: o.logoUrl,
-      role: o.role,
-    }));
   }
 }

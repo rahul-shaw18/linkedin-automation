@@ -21,12 +21,6 @@ export interface LinkedInUserInfo {
   picture?: string;
 }
 
-export interface LinkedInOrganizationDetail {
-  name: string;
-  vanityName: string | null;
-  logoUrl?: string | null;
-}
-
 @Injectable()
 export class LinkedInApiClient {
   private readonly logger = new Logger(LinkedInApiClient.name);
@@ -181,67 +175,6 @@ export class LinkedInApiClient {
       });
     } catch (err: any) {
       this.logger.warn(`Could not revoke LinkedIn token: ${err.message}`);
-    }
-  }
-
-  async fetchOrganizationAcls(accessToken: string): Promise<string[]> {
-    try {
-      const response = await fetch(
-        'https://api.linkedin.com/v2/organizationalEntityAcls?q=roleAssignee&state=APPROVED',
-        {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          signal: AbortSignal.timeout(5000),
-        },
-      );
-
-      if (!response.ok) {
-        return [];
-      }
-
-      const data = await response.json();
-      const elements = Array.isArray(data?.elements) ? data.elements : [];
-
-      return elements
-        .map((el: any) => el.organizationalTarget)
-        .filter(
-          (target: any): target is string =>
-            typeof target === 'string' && target.startsWith('urn:li:organization:'),
-        );
-    } catch (err: any) {
-      this.logger.debug(`Could not discover organizations via LinkedIn ACL: ${err.message}`);
-      return [];
-    }
-  }
-
-  async fetchOrganizationDetails(
-    accessToken: string,
-    numericOrgId: string,
-  ): Promise<LinkedInOrganizationDetail> {
-    const fallback: LinkedInOrganizationDetail = {
-      name: `Organization ${numericOrgId}`,
-      vanityName: null,
-    };
-
-    try {
-      const response = await fetch(
-        `https://api.linkedin.com/v2/organizations/${numericOrgId}`,
-        {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          signal: AbortSignal.timeout(4000),
-        },
-      );
-
-      if (!response.ok) {
-        return fallback;
-      }
-
-      const data = await response.json();
-      return {
-        name: data.localizedName || fallback.name,
-        vanityName: data.vanityName || null,
-      };
-    } catch {
-      return fallback;
     }
   }
 }

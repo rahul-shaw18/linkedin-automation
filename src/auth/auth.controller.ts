@@ -17,7 +17,6 @@ import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LinkedInCallbackDto } from './dto/linkedin-callback.dto';
 import { LinkedInAccountResponseDto } from './dto/linkedin-account-response.dto';
-import { LinkedInOrganizationResponseDto } from './dto/linkedin-organization-response.dto';
 
 @ApiTags('LinkedIn Auth')
 @Controller('auth/linkedin')
@@ -131,7 +130,7 @@ export class AuthController {
 
     return {
       authenticated: !!activeAccount,
-      userId: sessionUserId,
+      userId: activeAccount ? activeAccount.userId : sessionUserId,
       account: activeAccount ? LinkedInAccountResponseDto.fromEntity(activeAccount) : null,
     };
   }
@@ -212,22 +211,6 @@ export class AuthController {
     const account = await this.authService.disconnectAccount(accountId);
     this.clearSessionCookie(reply);
     return LinkedInAccountResponseDto.fromEntity(account);
-  }
-
-  @Get('organizations/:userId')
-  @ApiOperation({
-    summary: 'List managed organization/company pages for a user',
-    description: 'Retrieves all LinkedIn company pages that the active account can post to.',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Array of managed company pages',
-    type: [LinkedInOrganizationResponseDto],
-  })
-  async getUserOrganizations(
-    @Param('userId') userId: string,
-  ): Promise<LinkedInOrganizationResponseDto[]> {
-    return this.authService.getUserOrganizations(userId);
   }
 }
 

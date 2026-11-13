@@ -7,7 +7,6 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateScheduledPostDto } from './dto/create-scheduled-post.dto';
 import { PostStatus, ScheduledPost, AccountStatus } from '@prisma/client';
-import { formatOrganizationUrn } from '../common/utils/linkedin.util';
 
 const accountSummarySelect = {
   id: true,
@@ -32,14 +31,14 @@ export class PostsService {
 
     const account = await this.prisma.linkedInAccount.findUnique({
       where: { id: dto.accountId },
-      select: { id: true, userId: true, status: true },
+      select: { id: true, userId: true, linkedInId: true, name: true, status: true },
     });
 
     if (!account) {
       throw new NotFoundException(`LinkedIn account with ID ${dto.accountId} does not exist.`);
     }
 
-    if (account.userId !== dto.userId) {
+    if (account.userId !== dto.userId && account.linkedInId !== dto.userId) {
       throw new BadRequestException(
         `LinkedIn account ${dto.accountId} does not belong to user ${dto.userId}.`,
       );
@@ -51,27 +50,16 @@ export class PostsService {
       );
     }
 
-    let targetUrn = dto.targetUrn?.trim() || null;
-    if (dto.targetType === 'ORGANIZATION') {
-      const formatted = formatOrganizationUrn(targetUrn);
-      if (!formatted) {
-        throw new BadRequestException(
-          `Invalid organization target URN "${dto.targetUrn}". LinkedIn requires a numeric organization ID (e.g. urn:li:organization:12345678).`,
-        );
-      }
-      targetUrn = formatted;
-    }
-
     const newPost = await this.prisma.scheduledPost.create({
       data: {
-        userId: dto.userId,
+        userId: account.userId,
         accountId: dto.accountId,
         content: dto.content,
         scheduledTime: scheduledDate,
         status: PostStatus.PENDING,
-        targetType: dto.targetType || 'PERSON',
-        targetUrn,
-        targetName: dto.targetName || null,
+        targetType: 'PERSON',
+        targetUrn: null,
+        targetName: account.name || 'Personal Profile',
       },
     });
 
@@ -90,8 +78,23 @@ export class PostsService {
     const safeLimit = Math.min(Math.max(1, Number(limit) || 50), 100);
     const safeOffset = Math.max(0, Number(offset) || 0);
 
-    return this.prisma.scheduledPost.findMany({
+    const userAccounts = await this.prisma.linkedInAccount.findMany({
       where: { userId },
+      select: { id: true, linkedInId: true },
+    });
+    const linkedInIds = userAccounts
+      .map((acc) => acc.linkedInId)
+      .filter((id): id is string => Boolean(id));
+
+    return this.prisma.scheduledPost.findMany({
+      where: {
+        OR: [
+          { userId },
+          ...(linkedInIds.length > 0
+            ? [{ account: { linkedInId: { in: linkedInIds } } }]
+            : []),
+        ],
+      },
       orderBy: { scheduledTime: 'desc' },
       take: safeLimit,
       skip: safeOffset,
