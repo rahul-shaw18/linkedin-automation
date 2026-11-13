@@ -7,6 +7,15 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateScheduledPostDto } from './dto/create-scheduled-post.dto';
 import { PostStatus, ScheduledPost, AccountStatus } from '@prisma/client';
+import { formatOrganizationUrn } from '../common/utils/linkedin.util';
+
+const accountSummarySelect = {
+  id: true,
+  linkedInId: true,
+  status: true,
+  name: true,
+  pictureUrl: true,
+};
 
 @Injectable()
 export class PostsService {
@@ -44,20 +53,13 @@ export class PostsService {
 
     let targetUrn = dto.targetUrn?.trim() || null;
     if (dto.targetType === 'ORGANIZATION') {
-      if (!targetUrn) {
-        throw new BadRequestException('An organization post requires a valid targetUrn.');
-      }
-      const urlMatch = targetUrn.match(/(?:company\/|organization:?)(\d+)/i);
-      if (urlMatch) {
-        targetUrn = `urn:li:organization:${urlMatch[1]}`;
-      } else if (/^\d+$/.test(targetUrn)) {
-        targetUrn = `urn:li:organization:${targetUrn}`;
-      }
-      if (!/^urn:li:organization:\d+$/.test(targetUrn)) {
+      const formatted = formatOrganizationUrn(targetUrn);
+      if (!formatted) {
         throw new BadRequestException(
           `Invalid organization target URN "${dto.targetUrn}". LinkedIn requires a numeric organization ID (e.g. urn:li:organization:12345678).`,
         );
       }
+      targetUrn = formatted;
     }
 
     const newPost = await this.prisma.scheduledPost.create({
@@ -95,13 +97,7 @@ export class PostsService {
       skip: safeOffset,
       include: {
         account: {
-          select: {
-            id: true,
-            linkedInId: true,
-            status: true,
-            name: true,
-            pictureUrl: true,
-          },
+          select: accountSummarySelect,
         },
       },
     });
@@ -112,13 +108,7 @@ export class PostsService {
       where: { id: postId },
       include: {
         account: {
-          select: {
-            id: true,
-            linkedInId: true,
-            status: true,
-            name: true,
-            pictureUrl: true,
-          },
+          select: accountSummarySelect,
         },
       },
     });

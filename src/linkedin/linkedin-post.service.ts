@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LinkedInAccount } from '@prisma/client';
+import { extractOrganizationId } from '../common/utils/linkedin.util';
 
 export interface PublishResult {
   postId: string;
@@ -84,7 +85,7 @@ export class LinkedInPostService {
             this.configService.get<string>('ALLOW_SIMULATED_ORG_POST') === 'true';
 
           if (allowSimulated) {
-            const orgCleanId = authorUrn.replace('urn:li:organization:', '');
+            const orgCleanId = extractOrganizationId(authorUrn) || 'org';
             const simulatedUrn = `urn:li:share:org-${orgCleanId}-${Date.now()}`;
             this.logger.log(
               `ALLOW_SIMULATED_ORG_POST is enabled. Recording simulated company page post for ${authorUrn}: ${simulatedUrn}`,

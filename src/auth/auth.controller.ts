@@ -27,6 +27,21 @@ export class AuthController {
     private readonly configService: ConfigService,
   ) {}
 
+  private setSessionCookie(reply: FastifyReply, userId: string): void {
+    const isProd = this.configService.get<string>('NODE_ENV') === 'production';
+    reply.setCookie('la_session', userId, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+  }
+
+  private clearSessionCookie(reply: FastifyReply): void {
+    reply.clearCookie('la_session', { path: '/' });
+  }
+
   @Get('login-url')
   @ApiOperation({
     summary: 'Generate LinkedIn OAuth 2.0 Authorization URL',
@@ -84,15 +99,7 @@ export class AuthController {
 
     try {
       const account = await this.authService.handleOAuthCallback(code, userId);
-      const isProd = this.configService.get<string>('NODE_ENV') === 'production';
-
-      reply.setCookie('la_session', account.userId, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        path: '/',
-      });
+      this.setSessionCookie(reply, account.userId);
 
       return reply.status(302).redirect(
         `${frontendUrl}/?connected=true&userId=${encodeURIComponent(account.userId)}`,
@@ -140,7 +147,7 @@ export class AuthController {
     description: 'Successfully logged out',
   })
   async logout(@Res({ passthrough: true }) reply: FastifyReply) {
-    reply.clearCookie('la_session', { path: '/' });
+    this.clearSessionCookie(reply);
     return { success: true, message: 'Logged out successfully' };
   }
 
@@ -166,14 +173,7 @@ export class AuthController {
       dto.redirectUri,
     );
 
-    const isProd = this.configService.get<string>('NODE_ENV') === 'production';
-    reply.setCookie('la_session', account.userId, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-      path: '/',
-    });
+    this.setSessionCookie(reply, account.userId);
 
     return LinkedInAccountResponseDto.fromEntity(account);
   }
@@ -210,7 +210,7 @@ export class AuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<LinkedInAccountResponseDto> {
     const account = await this.authService.disconnectAccount(accountId);
-    reply.clearCookie('la_session', { path: '/' });
+    this.clearSessionCookie(reply);
     return LinkedInAccountResponseDto.fromEntity(account);
   }
 
