@@ -1,11 +1,15 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('System & Health')
 @Controller('health')
 export class HealthController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -16,12 +20,20 @@ export class HealthController {
     status: 200,
     description: 'System health report',
   })
+  @ApiResponse({
+    status: 503,
+    description: 'Database or critical dependency is unavailable',
+  })
   async getHealth() {
-    let databaseStatus = 'connected';
     try {
       await this.prisma.$queryRaw`SELECT 1`;
     } catch {
-      databaseStatus = 'unreachable';
+      throw new ServiceUnavailableException({
+        status: 'degraded',
+        service: 'linkedin-automation-engine',
+        timestamp: new Date().toISOString(),
+        database: 'unreachable',
+      });
     }
 
     return {
@@ -29,8 +41,8 @@ export class HealthController {
       service: 'linkedin-automation-engine',
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
-      environment: process.env.NODE_ENV || 'development',
-      database: databaseStatus,
+      environment: this.configService.get<string>('NODE_ENV') || 'development',
+      database: 'connected',
       memoryUsageMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
     };
   }

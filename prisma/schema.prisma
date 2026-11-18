@@ -35,27 +35,9 @@ model LinkedInAccount {
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
   posts          ScheduledPost[]
-  organizations  LinkedInOrganization[]
 
   @@unique([userId, linkedInId])
   @@index([userId, status])
-}
-
-model LinkedInOrganization {
-  id             String          @id @default(uuid())
-  accountId      String
-  account        LinkedInAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  orgId          String
-  orgUrn         String
-  name           String
-  vanityName     String?
-  logoUrl        String?         @db.Text
-  role           String?         @default("ADMINISTRATOR")
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-
-  @@unique([accountId, orgUrn])
-  @@index([accountId])
 }
 
 model ScheduledPost {
@@ -66,9 +48,6 @@ model ScheduledPost {
   content        String          @db.Text
   scheduledTime  DateTime
   status         PostStatus      @default(PENDING)
-  targetType     String?         @default("PERSON")
-  targetUrn      String?
-  targetName     String?
   linkedInPostId String?
   failureReason  String?
   createdAt      DateTime        @default(now())

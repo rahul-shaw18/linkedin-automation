@@ -1,5 +1,22 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PostStatus } from '@prisma/client';
+import { AccountStatus, PostStatus } from '@prisma/client';
+
+export class AccountSummaryDto {
+  @ApiProperty({ example: '87bfa254-4693-4796-98ec-6e1215104113' })
+  id: string;
+
+  @ApiProperty({ example: 'a1b2c3d4e5' })
+  linkedInId: string;
+
+  @ApiProperty({ enum: AccountStatus, example: AccountStatus.ACTIVE })
+  status: AccountStatus;
+
+  @ApiPropertyOptional({ example: 'Rahul Shaw' })
+  name?: string | null;
+
+  @ApiPropertyOptional({ example: 'https://media.licdn.com/dms/image/...' })
+  pictureUrl?: string | null;
+}
 
 export class ScheduledPostResponseDto {
   @ApiProperty({ example: '6b414f52-8418-4b95-ba38-b7eb48b2649b' })
@@ -20,15 +37,6 @@ export class ScheduledPostResponseDto {
   @ApiProperty({ enum: PostStatus, example: PostStatus.PENDING })
   status: PostStatus;
 
-  @ApiPropertyOptional({ example: 'ORGANIZATION', enum: ['PERSON', 'ORGANIZATION'] })
-  targetType?: string | null;
-
-  @ApiPropertyOptional({ example: 'urn:li:organization:12345678' })
-  targetUrn?: string | null;
-
-  @ApiPropertyOptional({ example: 'Acme Corp' })
-  targetName?: string | null;
-
   @ApiPropertyOptional({ example: 'urn:li:share:7123456789' })
   linkedInPostId?: string | null;
 
@@ -40,5 +48,7 @@ export class ScheduledPostResponseDto {
 
   @ApiProperty({ example: '2026-11-01T12:00:00.000Z' })
   updatedAt: Date;
-}
 
+  @ApiPropertyOptional({ type: AccountSummaryDto })
+  account?: AccountSummaryDto | null;
+}

@@ -7,6 +7,20 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { LinkedInApiClient } from './linkedin-api.client';
 import { AccountStatus, LinkedInAccount } from '@prisma/client';
+import { LinkedInAccountResponseDto } from './dto/linkedin-account-response.dto';
+
+const accountSelect = {
+  id: true,
+  userId: true,
+  linkedInId: true,
+  name: true,
+  email: true,
+  pictureUrl: true,
+  tokenExpiresAt: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 @Injectable()
 export class AuthService {
@@ -25,7 +39,7 @@ export class AuthService {
     code: string,
     userId: string,
     customRedirectUri?: string,
-  ): Promise<LinkedInAccount> {
+  ): Promise<LinkedInAccountResponseDto> {
     this.logger.log(`Exchanging authorization code for userId=${userId}`);
 
     const tokenData = await this.linkedInApi.exchangeCodeForTokens(code, customRedirectUri);
@@ -41,52 +55,57 @@ export class AuthService {
     const targetUserId = existingAccount?.userId || userInfo.id;
     const targetAccountId = existingAccount?.id;
 
-    let account: LinkedInAccount;
-    if (targetAccountId) {
-      account = await this.prisma.linkedInAccount.update({
-        where: { id: targetAccountId },
-        data: {
-          status: AccountStatus.ACTIVE,
-          accessToken: tokenData.access_token,
-          refreshToken: tokenData.refresh_token ?? undefined,
-          tokenExpiresAt,
-          name: userInfo.name ?? undefined,
-          email: userInfo.email ?? undefined,
-          pictureUrl: userInfo.picture ?? undefined,
+    // Use transaction to ensure account upsert and past post reassignment are atomic
+    return this.prisma.$transaction(async (tx) => {
+      let account: LinkedInAccountResponseDto;
+      if (targetAccountId) {
+        account = await tx.linkedInAccount.update({
+          where: { id: targetAccountId },
+          data: {
+            status: AccountStatus.ACTIVE,
+            accessToken: tokenData.access_token,
+            refreshToken: tokenData.refresh_token ?? undefined,
+            tokenExpiresAt,
+            name: userInfo.name ?? undefined,
+            email: userInfo.email ?? undefined,
+            pictureUrl: userInfo.picture ?? undefined,
+          },
+          select: accountSelect,
+        });
+      } else {
+        account = await tx.linkedInAccount.create({
+          data: {
+            userId: targetUserId,
+            linkedInId: userInfo.id,
+            name: userInfo.name ?? null,
+            email: userInfo.email ?? null,
+            pictureUrl: userInfo.picture ?? null,
+            accessToken: tokenData.access_token,
+            refreshToken: tokenData.refresh_token ?? null,
+            tokenExpiresAt,
+            status: AccountStatus.ACTIVE,
+          },
+          select: accountSelect,
+        });
+      }
+
+      // Consolidate past posts for this member to the canonical userId and account
+      await tx.scheduledPost.updateMany({
+        where: {
+          account: { linkedInId: userInfo.id },
         },
-      });
-    } else {
-      account = await this.prisma.linkedInAccount.create({
         data: {
           userId: targetUserId,
-          linkedInId: userInfo.id,
-          name: userInfo.name ?? null,
-          email: userInfo.email ?? null,
-          pictureUrl: userInfo.picture ?? null,
-          accessToken: tokenData.access_token,
-          refreshToken: tokenData.refresh_token ?? null,
-          tokenExpiresAt,
-          status: AccountStatus.ACTIVE,
+          accountId: account.id,
         },
       });
-    }
 
-    // Consolidate past posts for this member to the canonical userId and account
-    await this.prisma.scheduledPost.updateMany({
-      where: {
-        account: { linkedInId: userInfo.id },
-      },
-      data: {
-        userId: targetUserId,
-        accountId: account.id,
-      },
+      this.logger.log(
+        `LinkedIn account connected: userId=${account.userId}, accountId=${account.id}, linkedInId=${userInfo.id}, name=${userInfo.name || 'N/A'}`,
+      );
+
+      return account;
     });
-
-    this.logger.log(
-      `LinkedIn account connected: userId=${account.userId}, accountId=${account.id}, linkedInId=${userInfo.id}, name=${userInfo.name || 'N/A'}`,
-    );
-
-    return account;
   }
 
   async getValidAccessToken(accountOrId: string | LinkedInAccount): Promise<string> {
@@ -159,10 +178,12 @@ export class AuthService {
       );
 
       return refreshed.access_token;
-    } catch (error: any) {
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
       this.logger.error(
-        `Failed to refresh LinkedIn token for account ${account.id}: ${error.message}`,
-        error.stack,
+        `Failed to refresh LinkedIn token for account ${account.id}: ${errorMsg}`,
+        errorStack,
       );
 
       if (now >= expiresAt) {
@@ -171,7 +192,7 @@ export class AuthService {
           data: { status: AccountStatus.EXPIRED },
         });
         throw new UnauthorizedException(
-          `Token refresh failed and access token is expired: ${error.message}`,
+          `Token refresh failed and access token is expired: ${errorMsg}`,
         );
       }
 
@@ -180,7 +201,7 @@ export class AuthService {
     }
   }
 
-  async getUserAccounts(userId: string): Promise<LinkedInAccount[]> {
+  async getUserAccounts(userId: string): Promise<LinkedInAccountResponseDto[]> {
     return this.prisma.linkedInAccount.findMany({
       where: {
         OR: [
@@ -189,22 +210,11 @@ export class AuthService {
         ],
       },
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        userId: true,
-        linkedInId: true,
-        name: true,
-        email: true,
-        pictureUrl: true,
-        tokenExpiresAt: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }) as unknown as Promise<LinkedInAccount[]>;
+      select: accountSelect,
+    });
   }
 
-  async disconnectAccount(accountId: string): Promise<LinkedInAccount> {
+  async disconnectAccount(accountId: string): Promise<LinkedInAccountResponseDto> {
     const account = await this.prisma.linkedInAccount.findUnique({
       where: { id: accountId },
     });
@@ -221,6 +231,7 @@ export class AuthService {
         accessToken: '',
         refreshToken: null,
       },
+      select: accountSelect,
     });
   }
 }

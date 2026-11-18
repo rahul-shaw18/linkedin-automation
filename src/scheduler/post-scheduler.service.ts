@@ -4,7 +4,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { LinkedInPostService } from '../linkedin/linkedin-post.service';
 import { SseEventsService } from '../events/sse-events.service';
-import { PostStatus } from '@prisma/client';
+import { PostStatus, Prisma } from '@prisma/client';
+
+type DuePostWithAccount = Prisma.ScheduledPostGetPayload<{
+  include: { account: true };
+}>;
 
 @Injectable()
 export class PostSchedulerService {
@@ -27,8 +31,9 @@ export class PostSchedulerService {
     this.isRunning = true;
     try {
       await this.publishDuePosts();
-    } catch (error: any) {
-      this.logger.error(`Error in scheduled posts check: ${error.message}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error in scheduled posts check: ${msg}`);
     } finally {
       this.isRunning = false;
     }
@@ -48,6 +53,7 @@ export class PostSchedulerService {
       orderBy: {
         scheduledTime: 'asc',
       },
+      take: 20,
     });
 
     if (duePosts.length === 0) {
@@ -61,11 +67,20 @@ export class PostSchedulerService {
     }
   }
 
-  private async processSinglePost(post: any): Promise<void> {
-    await this.prisma.scheduledPost.update({
-      where: { id: post.id },
+  private async processSinglePost(post: DuePostWithAccount): Promise<void> {
+    // Atomic status transition: protects against duplicate publishing across multiple worker instances
+    const claimed = await this.prisma.scheduledPost.updateMany({
+      where: {
+        id: post.id,
+        status: PostStatus.PENDING,
+      },
       data: { status: PostStatus.PROCESSING },
     });
+
+    if (claimed.count === 0) {
+      this.logger.warn(`Post ${post.id} was already claimed by another process.`);
+      return;
+    }
 
     this.sseEventsService.emitPostEvent({
       userId: post.userId,
@@ -81,7 +96,6 @@ export class PostSchedulerService {
         post.account,
         post.content,
         accessToken,
-        post.targetUrn,
       );
 
       const publishedPost = await this.prisma.scheduledPost.update({
@@ -100,8 +114,8 @@ export class PostSchedulerService {
       });
 
       this.logger.log(`Post ${post.id} published successfully. ID: ${result.postId}`);
-    } catch (error: any) {
-      const reason = error.message || 'Unknown publishing error';
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Unknown publishing error';
       this.logger.error(`Failed to publish post ${post.id}: ${reason}`);
 
       const failedPost = await this.prisma.scheduledPost.update({

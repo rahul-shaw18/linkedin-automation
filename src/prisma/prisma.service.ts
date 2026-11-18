@@ -5,21 +5,14 @@ import { PrismaClient } from '@prisma/client';
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
-  constructor() {
-    super({
-      log:
-        process.env.DEBUG_PRISMA === 'true'
-          ? ['query', 'info', 'warn', 'error']
-          : ['error', 'warn'],
-    });
-  }
-
   async onModuleInit() {
     try {
       await this.$connect();
       this.logger.log('Successfully connected to database via Prisma ORM.');
     } catch (error) {
-      this.logger.error('Database connection error in PrismaService:', error.message);
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Database connection failure in PrismaService: ${message}`);
+      throw error;
     }
   }
 
@@ -28,4 +21,3 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     this.logger.log('Disconnected Prisma Client.');
   }
 }
-

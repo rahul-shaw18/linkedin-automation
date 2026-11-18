@@ -8,4 +8,4 @@ import { LinkedInApiClient } from './linkedin-api.client';
   providers: [AuthService, LinkedInApiClient],
   exports: [AuthService, LinkedInApiClient],
 })
-export class LinkedInAuthModule {}
+export class AuthModule {}

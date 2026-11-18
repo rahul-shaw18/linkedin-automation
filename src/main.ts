@@ -1,5 +1,5 @@
-import { NestFactory, Reflector } from '@nestjs/core';
-import { ValidationPipe, Logger, ClassSerializerInterceptor } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { NestFastifyApplication, FastifyAdapter } from '@nestjs/platform-fastify';
@@ -19,11 +19,19 @@ async function bootstrap() {
   const port = configService.get<number>('PORT') || 3000;
   const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
   const frontendUrl = configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
+  const cookieSecret =
+    configService.get<string>('COOKIE_SECRET') || 'la_cookie_signing_secret_min_32_characters_long';
 
-  await app.register(fastifyCookie);
+  await app.register(fastifyCookie, {
+    secret: cookieSecret,
+  });
+
+  const corsOrigins = Array.from(
+    new Set([frontendUrl, 'http://localhost:4200', 'http://127.0.0.1:4200']),
+  );
 
   app.enableCors({
-    origin: [frontendUrl, 'http://localhost:4200', 'http://127.0.0.1:4200'],
+    origin: corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
@@ -31,11 +39,7 @@ async function bootstrap() {
 
   app.enableShutdownHooks();
 
-  app.useGlobalInterceptors(
-    new LoggingInterceptor(),
-    new ClassSerializerInterceptor(app.get(Reflector)),
-  );
-
+  app.useGlobalInterceptors(new LoggingInterceptor());
   app.useGlobalFilters(new AllExceptionsFilter());
 
   app.useGlobalPipes(
@@ -66,7 +70,7 @@ async function bootstrap() {
     customSiteTitle: 'LinkedIn Scheduler API Docs',
   });
 
-  await app.listen(port, '0.0.0.0');
+  await app.listen({ port, host: '0.0.0.0' });
 
   logger.log(`========================================================`);
   logger.log(`LinkedIn Scheduler Engine (Fastify) is running on: http://localhost:${port}`);

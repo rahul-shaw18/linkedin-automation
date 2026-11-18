@@ -6,15 +6,33 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateScheduledPostDto } from './dto/create-scheduled-post.dto';
-import { PostStatus, ScheduledPost, AccountStatus } from '@prisma/client';
+import { PostStatus, AccountStatus, Prisma } from '@prisma/client';
 
-const accountSummarySelect = {
+export const postWithAccountSelect = {
   id: true,
-  linkedInId: true,
+  userId: true,
+  accountId: true,
+  content: true,
+  scheduledTime: true,
   status: true,
-  name: true,
-  pictureUrl: true,
-};
+  linkedInPostId: true,
+  failureReason: true,
+  createdAt: true,
+  updatedAt: true,
+  account: {
+    select: {
+      id: true,
+      linkedInId: true,
+      status: true,
+      name: true,
+      pictureUrl: true,
+    },
+  },
+} as const;
+
+export type PostWithAccount = Prisma.ScheduledPostGetPayload<{
+  select: typeof postWithAccountSelect;
+}>;
 
 @Injectable()
 export class PostsService {
@@ -22,11 +40,17 @@ export class PostsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async createScheduledPost(dto: CreateScheduledPostDto): Promise<ScheduledPost> {
+  async createScheduledPost(dto: CreateScheduledPostDto): Promise<PostWithAccount> {
     const scheduledDate = new Date(dto.scheduledTime);
 
     if (isNaN(scheduledDate.getTime())) {
       throw new BadRequestException('Invalid scheduledTime timestamp provided.');
+    }
+
+    // Allow scheduling at current time or future; reject times more than 5 minutes in the past
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    if (scheduledDate.getTime() < fiveMinutesAgo) {
+      throw new BadRequestException('Cannot schedule a post in the past.');
     }
 
     const account = await this.prisma.linkedInAccount.findUnique({
@@ -57,10 +81,8 @@ export class PostsService {
         content: dto.content,
         scheduledTime: scheduledDate,
         status: PostStatus.PENDING,
-        targetType: 'PERSON',
-        targetUrn: null,
-        targetName: account.name || 'Personal Profile',
       },
+      select: postWithAccountSelect,
     });
 
     this.logger.log(
@@ -74,46 +96,29 @@ export class PostsService {
     userId: string,
     limit: number = 50,
     offset: number = 0,
-  ): Promise<ScheduledPost[]> {
-    const safeLimit = Math.min(Math.max(1, Number(limit) || 50), 100);
-    const safeOffset = Math.max(0, Number(offset) || 0);
-
-    const userAccounts = await this.prisma.linkedInAccount.findMany({
-      where: { userId },
-      select: { id: true, linkedInId: true },
-    });
-    const linkedInIds = userAccounts
-      .map((acc) => acc.linkedInId)
-      .filter((id): id is string => Boolean(id));
+  ): Promise<PostWithAccount[]> {
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const safeOffset = Math.max(0, offset);
 
     return this.prisma.scheduledPost.findMany({
       where: {
         OR: [
           { userId },
-          ...(linkedInIds.length > 0
-            ? [{ account: { linkedInId: { in: linkedInIds } } }]
-            : []),
+          { account: { userId } },
+          { account: { linkedInId: userId } },
         ],
       },
       orderBy: { scheduledTime: 'desc' },
       take: safeLimit,
       skip: safeOffset,
-      include: {
-        account: {
-          select: accountSummarySelect,
-        },
-      },
+      select: postWithAccountSelect,
     });
   }
 
-  async getPostById(postId: string): Promise<ScheduledPost> {
+  async getPostById(postId: string): Promise<PostWithAccount> {
     const post = await this.prisma.scheduledPost.findUnique({
       where: { id: postId },
-      include: {
-        account: {
-          select: accountSummarySelect,
-        },
-      },
+      select: postWithAccountSelect,
     });
 
     if (!post) {
@@ -141,9 +146,19 @@ export class PostsService {
       throw new BadRequestException('Cannot cancel a post that is currently being processed by the publisher.');
     }
 
-    await this.prisma.scheduledPost.delete({
-      where: { id: postId },
+    // Atomic delete ensuring the post status has not changed to PROCESSING concurrently
+    const deleted = await this.prisma.scheduledPost.deleteMany({
+      where: {
+        id: postId,
+        status: { in: [PostStatus.PENDING, PostStatus.FAILED] },
+      },
     });
+
+    if (deleted.count === 0) {
+      throw new BadRequestException(
+        'Post could not be cancelled because it is already being processed or published.',
+      );
+    }
 
     this.logger.log(`Post ${postId} was successfully cancelled and deleted.`);
 
@@ -153,10 +168,10 @@ export class PostsService {
     };
   }
 
-  async retryFailedPost(postId: string, newScheduledTime?: string): Promise<ScheduledPost> {
+  async retryFailedPost(postId: string, newScheduledTime?: string): Promise<PostWithAccount> {
     const post = await this.prisma.scheduledPost.findUnique({
       where: { id: postId },
-      select: { id: true, status: true, targetUrn: true },
+      select: { id: true, status: true },
     });
 
     if (!post) {
@@ -176,6 +191,7 @@ export class PostsService {
         scheduledTime: scheduledDate,
         failureReason: null,
       },
+      select: postWithAccountSelect,
     });
   }
 }

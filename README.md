@@ -8,7 +8,7 @@ In modern professional life, maintaining a consistent posting schedule on Linked
 ### Key Objectives
 * **Post Scheduling:** Compose posts (up to 3,000 characters) and select future dates and times for automated publishing.
 * **Automated Dispatching:** An autonomous background worker service that periodically scans the database and publishes due posts via the LinkedIn REST API.
-* **Queue Management:** Complete lifecycle management allowing users to view, manage, and cancel scheduled posts before dispatch.
+* **Queue Management:** Complete lifecycle management allowing users to view, manage, cancel scheduled posts before dispatch, and 1-click retry failed posts.
 * **Real-time Status Tracking:** Real-time visibility into post statuses (`PENDING`, `PROCESSING`, `PUBLISHED`, `FAILED`) with detailed error logs for failed dispatches.
 
 ---
@@ -18,7 +18,7 @@ In modern professional life, maintaining a consistent posting schedule on Linked
 The application is structured into four core modules as defined in the project specification:
 
 ### Module Breakdown
-1. **Authentication Module (`LinkedInAuthModule`):** Manages user authentication using LinkedIn OAuth 2.0 with state verification. Exchanges authorization codes for access and refresh tokens, maintains user sessions via secure `HttpOnly` cookies, and handles proactive 24-hour token refreshes.
+1. **Authentication Module (`AuthModule`):** Manages user authentication using LinkedIn OAuth 2.0 with state verification. Exchanges authorization codes for access and refresh tokens, maintains user sessions via secure `HttpOnly` cookies, and handles proactive 24-hour token refreshes.
 2. **Post Management Module (`PostsModule`):** Provides endpoints to create, list, retrieve, and cancel scheduled posts. Enforces payload validation (character limits up to 3000 chars, valid timestamps).
 3. **Scheduler & Dispatcher Module (`SchedulerModule`):** A lightweight background cron service that runs every minute to query due posts, atomically lock records to prevent duplicate execution, and dispatch posts to LinkedIn.
 4. **Real-time Event Stream (`EventsModule`):** Server-Sent Events (SSE) channel that notifies the user interface in real time when posts transition through `POST_PROCESSING`, `POST_PUBLISHED`, or `POST_FAILED`.
@@ -31,7 +31,6 @@ The relational database is hosted on **Supabase Cloud** and managed via **Prisma
 
 * **`LinkedInAccount` (User Entity):** Stores user profile details (`userId`, `linkedInId`, `name`, `email`), encrypted OAuth access and refresh tokens, token expiration timestamps, and account status (`ACTIVE`, `EXPIRED`, `DISCONNECTED`).
 * **`ScheduledPost` (Post Entity):** Stores the scheduled commentary text, target execution time (`scheduledTime`), publishing status (`PENDING`, `PROCESSING`, `PUBLISHED`, `FAILED`), target author URN, returned `linkedInPostId`, and error diagnostics (`failureReason`).
-* **`LinkedInOrganization` (Company Page Entity):** Stores company pages administered by the user for multi-target publishing.
 
 ### Key Database Indexes
 * `ScheduledPost(status, scheduledTime)` — Optimizes the recurring 1-minute scheduler query.
@@ -45,7 +44,7 @@ The relational database is hosted on **Supabase Cloud** and managed via **Prisma
 * **HttpOnly Session Cookies:** User session identifiers are delivered via `HttpOnly`, `SameSite: Lax` cookies (`la_session`), preventing client-side script access and XSS-based session hijacking.
 * **SQL Injection Prevention:** All database operations use Prisma ORM parameterized queries.
 * **Input Validation & Sanitization:** Strict class-validator DTO guards prevent malformed payloads and buffer overruns.
-* **Timing-Safe Webhook Protection:** Scheduler webhook triggers utilize `crypto.timingSafeEqual` constant-time verification.
+* **Atomic State Locking:** Due posts transition to `PROCESSING` status atomically upon pickup by the background worker, preventing duplicate publishing attempts.
 
 ---
 
@@ -76,10 +75,12 @@ DIRECT_URL="postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres"
 LINKEDIN_CLIENT_ID="your_linkedin_client_id"
 LINKEDIN_CLIENT_SECRET="your_linkedin_client_secret"
 LINKEDIN_REDIRECT_URI="http://localhost:3000/auth/linkedin/callback"
+LINKEDIN_SCOPES="openid profile email w_member_social"
+LINKEDIN_API_VERSION="202610"
 
-CRON_SECRET_KEY="your_secure_cron_key"
 FRONTEND_URL="http://localhost:4200"
 PORT=3000
+NODE_ENV=development
 ```
 
 ### 4. Database Setup

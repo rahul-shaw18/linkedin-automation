@@ -13,7 +13,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 export class LoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
 
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const httpCtx = context.switchToHttp();
     const req = httpCtx.getRequest<FastifyRequest>();
     const res = httpCtx.getResponse<FastifyReply>();
@@ -35,14 +35,18 @@ export class LoggingInterceptor implements NestInterceptor {
             `[${method}] ${url} -> ${res.statusCode} (${duration}ms)`,
           );
         },
-        error: (err) => {
+        error: (err: unknown) => {
           const duration = Date.now() - startTime;
+          const status =
+            (err as Record<string, unknown>)?.status ||
+            (err as Record<string, unknown>)?.statusCode ||
+            500;
+          const message = err instanceof Error ? err.message : String(err);
           this.logger.warn(
-            `[${method}] ${url} -> ${err.status || 500} (${duration}ms) - ${err.message}`,
+            `[${method}] ${url} -> ${status} (${duration}ms) - ${message}`,
           );
         },
       }),
     );
   }
 }
-

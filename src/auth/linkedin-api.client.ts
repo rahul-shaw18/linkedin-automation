@@ -6,6 +6,13 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+export const LINKEDIN_ENDPOINTS = {
+  AUTHORIZATION: 'https://www.linkedin.com/oauth/v2/authorization',
+  ACCESS_TOKEN: 'https://www.linkedin.com/oauth/v2/accessToken',
+  USER_INFO: 'https://api.linkedin.com/v2/userinfo',
+  REVOKE: 'https://www.linkedin.com/oauth/v2/revoke',
+} as const;
+
 export interface LinkedInTokenResponse {
   access_token: string;
   expires_in: number;
@@ -56,7 +63,7 @@ export class LinkedInApiClient {
     });
 
     return {
-      url: `https://www.linkedin.com/oauth/v2/authorization?${params.toString()}`,
+      url: `${LINKEDIN_ENDPOINTS.AUTHORIZATION}?${params.toString()}`,
       state: statePayload,
     };
   }
@@ -78,25 +85,25 @@ export class LinkedInApiClient {
       client_secret: clientSecret,
     });
 
-    const response = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+    const response = await fetch(LINKEDIN_ENDPOINTS.ACCESS_TOKEN, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
       signal: AbortSignal.timeout(10000),
     });
 
-    const json = await response.json();
+    const json = (await response.json().catch(() => null)) as Record<string, string> | null;
     if (!response.ok) {
       const errorMsg = json?.error_description || json?.error || `HTTP ${response.status}`;
       throw new BadRequestException(`Failed to exchange LinkedIn authorization code: ${errorMsg}`);
     }
 
-    return json as LinkedInTokenResponse;
+    return json as unknown as LinkedInTokenResponse;
   }
 
   async fetchUserInfo(accessToken: string): Promise<LinkedInUserInfo> {
     try {
-      const response = await fetch('https://api.linkedin.com/v2/userinfo', {
+      const response = await fetch(LINKEDIN_ENDPOINTS.USER_INFO, {
         headers: { Authorization: `Bearer ${accessToken}` },
         signal: AbortSignal.timeout(10000),
       });
@@ -105,7 +112,7 @@ export class LinkedInApiClient {
         throw new Error(`HTTP ${response.status}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json().catch(() => ({}))) as Record<string, string>;
       const linkedInId = data.sub || data.id;
 
       if (!linkedInId) {
@@ -121,9 +128,10 @@ export class LinkedInApiClient {
         email: data.email || undefined,
         picture: data.picture || undefined,
       };
-    } catch (error: any) {
-      this.logger.error(`Failed to fetch LinkedIn user info: ${error.message}`);
-      throw new BadRequestException(`Could not retrieve LinkedIn profile: ${error.message}`);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to fetch LinkedIn user info: ${errorMsg}`);
+      throw new BadRequestException(`Could not retrieve LinkedIn profile: ${errorMsg}`);
     }
   }
 
@@ -138,20 +146,20 @@ export class LinkedInApiClient {
       client_secret: clientSecret,
     });
 
-    const response = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+    const response = await fetch(LINKEDIN_ENDPOINTS.ACCESS_TOKEN, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
       signal: AbortSignal.timeout(10000),
     });
 
-    const json = await response.json();
+    const json = (await response.json().catch(() => null)) as Record<string, string> | null;
     if (!response.ok) {
       const errorMsg = json?.error_description || json?.error || `HTTP ${response.status}`;
       throw new Error(errorMsg);
     }
 
-    return json as LinkedInTokenResponse;
+    return json as unknown as LinkedInTokenResponse;
   }
 
   async revokeToken(accessToken: string): Promise<void> {
@@ -163,7 +171,7 @@ export class LinkedInApiClient {
     }
 
     try {
-      await fetch('https://www.linkedin.com/oauth/v2/revoke', {
+      await fetch(LINKEDIN_ENDPOINTS.REVOKE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -173,8 +181,9 @@ export class LinkedInApiClient {
         }).toString(),
         signal: AbortSignal.timeout(5000),
       });
-    } catch (err: any) {
-      this.logger.warn(`Could not revoke LinkedIn token: ${err.message}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Could not revoke LinkedIn token: ${msg}`);
     }
   }
 }

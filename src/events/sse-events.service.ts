@@ -1,11 +1,11 @@
-import { Injectable, MessageEvent } from '@nestjs/common';
+import { Injectable, MessageEvent, BadRequestException } from '@nestjs/common';
 import { Subject, Observable, interval, merge } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 
 export interface PostEventPayload {
   userId: string;
   type: 'POST_PUBLISHED' | 'POST_FAILED' | 'POST_PROCESSING' | 'POST_CREATED';
-  post: any;
+  post: Record<string, unknown>;
   timestamp: string;
 }
 
@@ -21,8 +21,13 @@ export class SseEventsService {
   }
 
   getUserStream(userId: string): Observable<MessageEvent> {
+    const trimmedUserId = userId?.trim();
+    if (!trimmedUserId || trimmedUserId === 'ALL') {
+      throw new BadRequestException('A valid userId is required to subscribe to real-time events.');
+    }
+
     const userEvents$ = this.postEvents$.pipe(
-      filter((e) => !userId || e.userId === userId || userId === 'ALL'),
+      filter((e) => e.userId === trimmedUserId),
       map((event) => ({
         data: JSON.stringify(event),
       })),
@@ -38,4 +43,3 @@ export class SseEventsService {
     return merge(userEvents$, heartbeat$);
   }
 }
-

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { AccountStatus, LinkedInAccount } from '@prisma/client';
+import { AccountStatus } from '@prisma/client';
 
 export class LinkedInAccountResponseDto {
   @ApiProperty({ example: '87bfa254-4693-4796-98ec-6e1215104113' })
@@ -31,20 +31,5 @@ export class LinkedInAccountResponseDto {
 
   @ApiProperty({ example: '2026-11-01T12:00:00.000Z' })
   updatedAt: Date;
-
-  static fromEntity(account: LinkedInAccount): LinkedInAccountResponseDto {
-    return {
-      id: account.id,
-      userId: account.userId,
-      linkedInId: account.linkedInId,
-      name: account.name,
-      email: account.email,
-      pictureUrl: account.pictureUrl,
-      tokenExpiresAt: account.tokenExpiresAt,
-      status: account.status,
-      createdAt: account.createdAt,
-      updatedAt: account.updatedAt,
-    };
-  }
 }
 

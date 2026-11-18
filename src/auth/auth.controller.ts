@@ -10,13 +10,15 @@ import {
   HttpStatus,
   Res,
   Req,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { ConfigService } from '@nestjs/config';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LinkedInCallbackDto } from './dto/linkedin-callback.dto';
 import { LinkedInAccountResponseDto } from './dto/linkedin-account-response.dto';
+import { GetLoginUrlQueryDto, OAuthCallbackQueryDto } from './dto/auth-query.dto';
 
 @ApiTags('LinkedIn Auth')
 @Controller('auth/linkedin')
@@ -31,6 +33,7 @@ export class AuthController {
     reply.setCookie('la_session', userId, {
       httpOnly: true,
       secure: isProd,
+      signed: true,
       sameSite: 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000,
       path: '/',
@@ -41,27 +44,31 @@ export class AuthController {
     reply.clearCookie('la_session', { path: '/' });
   }
 
+  private extractSessionUserId(req: FastifyRequest): string | null {
+    const rawCookie = req.cookies?.['la_session'];
+    if (!rawCookie) {
+      return null;
+    }
+    const unsigned = req.unsignCookie(rawCookie);
+    if (unsigned.valid && unsigned.value) {
+      return unsigned.value;
+    }
+    // Fallback to raw value for unsigned backwards compatibility
+    return rawCookie;
+  }
+
   @Get('login-url')
   @ApiOperation({
     summary: 'Generate LinkedIn OAuth 2.0 Authorization URL',
     description:
       'Creates the redirect URL to send users to LinkedIn for authorizing the application.',
   })
-  @ApiQuery({ name: 'userId', required: true, description: 'Application or Clerk User ID' })
-  @ApiQuery({
-    name: 'redirectUri',
-    required: false,
-    description: 'Custom OAuth callback redirect URI',
-  })
   @ApiResponse({
     status: 200,
     description: 'Returns the authorization URL and state parameter',
   })
-  getLoginUrl(
-    @Query('userId') userId: string,
-    @Query('redirectUri') redirectUri?: string,
-  ) {
-    return this.authService.getAuthorizationUrl(userId, redirectUri);
+  getLoginUrl(@Query() query: GetLoginUrlQueryDto) {
+    return this.authService.getAuthorizationUrl(query.userId, query.redirectUri);
   }
 
   @Get('callback')
@@ -71,25 +78,28 @@ export class AuthController {
       'Handles the direct browser redirect from LinkedIn OAuth consent screen, decodes state, exchanges code for tokens, stores the account, sets HttpOnly session cookie, and redirects to frontend.',
   })
   async handleGetCallback(
-    @Query('code') code: string,
-    @Query('state') state: string,
+    @Query() query: OAuthCallbackQueryDto,
     @Res() reply: FastifyReply,
-    @Query('error') error?: string,
-    @Query('error_description') errorDescription?: string,
   ) {
     const frontendUrl =
       this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
 
-    if (error) {
+    if (query.error) {
       return reply.status(302).redirect(
-        `${frontendUrl}/?error=${encodeURIComponent(errorDescription || error)}`,
+        `${frontendUrl}/?error=${encodeURIComponent(query.error_description || query.error)}`,
+      );
+    }
+
+    if (!query.code) {
+      return reply.status(302).redirect(
+        `${frontendUrl}/?error=${encodeURIComponent('Missing authorization code from LinkedIn.')}`,
       );
     }
 
     let userId = 'default_user';
-    if (state) {
+    if (query.state) {
       try {
-        const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+        const decoded = JSON.parse(Buffer.from(query.state, 'base64url').toString('utf8'));
         if (decoded.userId) {
           userId = decoded.userId;
         }
@@ -97,15 +107,16 @@ export class AuthController {
     }
 
     try {
-      const account = await this.authService.handleOAuthCallback(code, userId);
+      const account = await this.authService.handleOAuthCallback(query.code, userId);
       this.setSessionCookie(reply, account.userId);
 
       return reply.status(302).redirect(
         `${frontendUrl}/?connected=true&userId=${encodeURIComponent(account.userId)}`,
       );
-    } catch (err: any) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'LinkedIn connection failed';
       return reply.status(302).redirect(
-        `${frontendUrl}/?error=${encodeURIComponent(err.message || 'LinkedIn connection failed')}`,
+        `${frontendUrl}/?error=${encodeURIComponent(message)}`,
       );
     }
   }
@@ -121,7 +132,7 @@ export class AuthController {
     description: 'Active session data or null if not authenticated',
   })
   async getMe(@Req() req: FastifyRequest) {
-    const sessionUserId = req.cookies?.['la_session'];
+    const sessionUserId = this.extractSessionUserId(req);
     if (!sessionUserId) {
       return { authenticated: false, userId: null, account: null };
     }
@@ -131,7 +142,7 @@ export class AuthController {
     return {
       authenticated: !!activeAccount,
       userId: activeAccount ? activeAccount.userId : sessionUserId,
-      account: activeAccount ? LinkedInAccountResponseDto.fromEntity(activeAccount) : null,
+      account: activeAccount,
     };
   }
 
@@ -174,7 +185,7 @@ export class AuthController {
 
     this.setSessionCookie(reply, account.userId);
 
-    return LinkedInAccountResponseDto.fromEntity(account);
+    return account;
   }
 
   @Get('accounts/:userId')
@@ -190,8 +201,7 @@ export class AuthController {
   async getUserAccounts(
     @Param('userId') userId: string,
   ): Promise<LinkedInAccountResponseDto[]> {
-    const accounts = await this.authService.getUserAccounts(userId);
-    return accounts.map(LinkedInAccountResponseDto.fromEntity);
+    return this.authService.getUserAccounts(userId);
   }
 
   @Delete('accounts/:accountId')
@@ -205,12 +215,11 @@ export class AuthController {
     type: LinkedInAccountResponseDto,
   })
   async disconnectAccount(
-    @Param('accountId') accountId: string,
+    @Param('accountId', new ParseUUIDPipe()) accountId: string,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<LinkedInAccountResponseDto> {
     const account = await this.authService.disconnectAccount(accountId);
     this.clearSessionCookie(reply);
-    return LinkedInAccountResponseDto.fromEntity(account);
+    return account;
   }
 }
-

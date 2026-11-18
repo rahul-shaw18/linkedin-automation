@@ -20,13 +20,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | object = 'Internal server error';
-    let errorDetail: any = null;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
-      if (typeof exceptionResponse === 'object') {
-        message = (exceptionResponse as any).message || exceptionResponse;
+      if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+        const respObj = exceptionResponse as Record<string, unknown>;
+        message = (respObj.message as string | object) || exceptionResponse;
       } else {
         message = exceptionResponse;
       }
@@ -35,7 +35,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         case 'P2002': {
           status = HttpStatus.CONFLICT;
           const target = (exception.meta?.target as string[]) || 'field';
-          message = `Unique constraint violation on ${Array.isArray(target) ? target.join(', ') : target}.`;
+          message = `Unique constraint violation on ${Array.isArray(target) ? target.join(', ') : String(target)}.`;
           break;
         }
         case 'P2025': {
@@ -50,9 +50,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
         }
         default:
           status = HttpStatus.BAD_REQUEST;
-          message = `Database query error (Prisma ${exception.code}): ${exception.message}`;
+          message = 'A database query operation error occurred.';
       }
-      errorDetail = exception.meta;
     } else if (exception instanceof Error) {
       message = exception.message;
     }
@@ -69,9 +68,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
       method: request.method,
-      error: message,
-      details: errorDetail,
+      message,
     });
   }
 }
-
