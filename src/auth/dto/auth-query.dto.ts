@@ -2,10 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class GetLoginUrlQueryDto {
-  @ApiProperty({ description: 'Application or Clerk User ID', example: 'user_2NNE7BvO8Zf1q' })
+  @ApiPropertyOptional({ description: 'Application or Clerk User ID', example: 'user_2NNE7BvO8Zf1q' })
   @IsString()
-  @IsNotEmpty()
-  userId: string;
+  @IsOptional()
+  userId?: string;
 
   @ApiPropertyOptional({
     description: 'Custom OAuth callback redirect URI',

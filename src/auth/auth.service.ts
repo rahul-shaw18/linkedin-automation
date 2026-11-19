@@ -31,8 +31,10 @@ export class AuthService {
     private readonly linkedInApi: LinkedInApiClient,
   ) {}
 
-  getAuthorizationUrl(userId: string, customRedirectUri?: string): { url: string; state: string } {
-    return this.linkedInApi.getAuthorizationUrl(userId, customRedirectUri);
+  getAuthorizationUrl(userId?: string, customRedirectUri?: string): { url: string; state: string } {
+    const effectiveUserId =
+      userId?.trim() || `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    return this.linkedInApi.getAuthorizationUrl(effectiveUserId, customRedirectUri);
   }
 
   async handleOAuthCallback(
