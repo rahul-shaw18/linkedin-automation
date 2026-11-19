@@ -16,6 +16,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
+import { SessionService } from './session.service';
 import { LinkedInCallbackDto } from './dto/linkedin-callback.dto';
 import { LinkedInAccountResponseDto } from './dto/linkedin-account-response.dto';
 import { GetLoginUrlQueryDto, OAuthCallbackQueryDto } from './dto/auth-query.dto';
@@ -25,37 +26,9 @@ import { GetLoginUrlQueryDto, OAuthCallbackQueryDto } from './dto/auth-query.dto
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly sessionService: SessionService,
     private readonly configService: ConfigService,
   ) {}
-
-  private setSessionCookie(reply: FastifyReply, userId: string): void {
-    const isProd = this.configService.get<string>('NODE_ENV') === 'production';
-    reply.setCookie('la_session', userId, {
-      httpOnly: true,
-      secure: isProd,
-      signed: true,
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-      path: '/',
-    });
-  }
-
-  private clearSessionCookie(reply: FastifyReply): void {
-    reply.clearCookie('la_session', { path: '/' });
-  }
-
-  private extractSessionUserId(req: FastifyRequest): string | null {
-    const rawCookie = req.cookies?.['la_session'];
-    if (!rawCookie) {
-      return null;
-    }
-    const unsigned = req.unsignCookie(rawCookie);
-    if (unsigned.valid && unsigned.value) {
-      return unsigned.value;
-    }
-    // Fallback to raw value for unsigned backwards compatibility
-    return rawCookie;
-  }
 
   @Get('login-url')
   @ApiOperation({
@@ -108,7 +81,7 @@ export class AuthController {
 
     try {
       const account = await this.authService.handleOAuthCallback(query.code, userId);
-      this.setSessionCookie(reply, account.userId);
+      this.sessionService.setSessionCookie(reply, account.userId);
 
       return reply.status(302).redirect(
         `${frontendUrl}/?connected=true&userId=${encodeURIComponent(account.userId)}`,
@@ -132,7 +105,7 @@ export class AuthController {
     description: 'Active session data or null if not authenticated',
   })
   async getMe(@Req() req: FastifyRequest) {
-    const sessionUserId = this.extractSessionUserId(req);
+    const sessionUserId = this.sessionService.extractSessionUserId(req);
     if (!sessionUserId) {
       return { authenticated: false, userId: null, account: null };
     }
@@ -157,7 +130,7 @@ export class AuthController {
     description: 'Successfully logged out',
   })
   async logout(@Res({ passthrough: true }) reply: FastifyReply) {
-    this.clearSessionCookie(reply);
+    this.sessionService.clearSessionCookie(reply);
     return { success: true, message: 'Logged out successfully' };
   }
 
@@ -183,7 +156,7 @@ export class AuthController {
       dto.redirectUri,
     );
 
-    this.setSessionCookie(reply, account.userId);
+    this.sessionService.setSessionCookie(reply, account.userId);
 
     return account;
   }
@@ -219,7 +192,7 @@ export class AuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<LinkedInAccountResponseDto> {
     const account = await this.authService.disconnectAccount(accountId);
-    this.clearSessionCookie(reply);
+    this.sessionService.clearSessionCookie(reply);
     return account;
   }
 }

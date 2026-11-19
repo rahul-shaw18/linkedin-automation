@@ -4,7 +4,13 @@ import { filter, map } from 'rxjs/operators';
 
 export interface PostEventPayload {
   userId: string;
-  type: 'POST_PUBLISHED' | 'POST_FAILED' | 'POST_PROCESSING' | 'POST_CREATED';
+  type:
+    | 'POST_PUBLISHED'
+    | 'POST_FAILED'
+    | 'POST_PROCESSING'
+    | 'POST_CREATED'
+    | 'POST_UPDATED'
+    | 'POST_DELETED';
   post: Record<string, unknown>;
   timestamp: string;
 }

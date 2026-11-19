@@ -3,11 +3,11 @@ import {
   Post,
   Get,
   Delete,
+  Patch,
   Body,
   Param,
   HttpCode,
   HttpStatus,
-  Query,
   Sse,
   MessageEvent,
   ParseUUIDPipe,
@@ -17,8 +17,8 @@ import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { PostsService } from './posts.service';
 import { SseEventsService } from '../events/sse-events.service';
 import { CreateScheduledPostDto } from './dto/create-scheduled-post.dto';
+import { UpdatePostDto } from './dto/update-post.dto';
 import { ScheduledPostResponseDto } from './dto/post-response.dto';
-import { PaginationQueryDto, RetryPostQueryDto } from './dto/pagination-query.dto';
 
 @ApiTags('LinkedIn Scheduled Posts')
 @Controller('posts')
@@ -65,7 +65,7 @@ export class PostsController {
   @Get('user/:userId')
   @ApiOperation({
     summary: 'Retrieve all posts for a user with status details',
-    description: 'Lists scheduled, processing, published, and failed posts for a given user ID with pagination support.',
+    description: 'Lists scheduled, processing, published, and failed posts for a given user ID.',
   })
   @ApiParam({ name: 'userId', description: 'User identifier' })
   @ApiResponse({
@@ -75,9 +75,8 @@ export class PostsController {
   })
   async getUserPosts(
     @Param('userId') userId: string,
-    @Query() pagination: PaginationQueryDto,
   ): Promise<ScheduledPostResponseDto[]> {
-    return this.postsService.getUserPosts(userId, pagination.limit, pagination.offset);
+    return this.postsService.getUserPosts(userId);
   }
 
   @Get(':postId')
@@ -101,30 +100,58 @@ export class PostsController {
     return this.postsService.getPostById(postId);
   }
 
-  @Delete(':postId')
+  @Patch(':postId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Cancel/delete a pending post',
+    summary: 'Edit / update a post',
     description:
-      'Cancels and deletes a scheduled post before it is published. Fails if the post is already published or processing.',
+      'Edits post commentary. If already published, updates commentary on LinkedIn via LinkedIn API and syncs DB. If pending or failed, updates commentary and/or scheduled time in DB.',
   })
   @ApiParam({ name: 'postId', description: 'Scheduled post UUID' })
   @ApiResponse({
     status: 200,
-    description: 'Post successfully cancelled',
+    description: 'Post updated successfully',
+    type: ScheduledPostResponseDto,
   })
   @ApiResponse({
     status: 400,
-    description: 'Cannot cancel an already published or processing post',
+    description: 'Validation failed or post is currently processing',
   })
   @ApiResponse({
     status: 404,
     description: 'Post not found',
   })
-  async cancelPost(
+  async updatePost(
+    @Param('postId', new ParseUUIDPipe()) postId: string,
+    @Body() dto: UpdatePostDto,
+  ): Promise<ScheduledPostResponseDto> {
+    return this.postsService.updatePost(postId, dto);
+  }
+
+  @Delete(':postId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delete post',
+    description:
+      'Deletes a post. If the post is published to LinkedIn, it deletes it from LinkedIn via the Posts API and removes it from the database. If pending or failed, it deletes it from the database.',
+  })
+  @ApiParam({ name: 'postId', description: 'Scheduled post UUID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Post successfully deleted',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Cannot delete a post currently being processed',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Post not found',
+  })
+  async deletePost(
     @Param('postId', new ParseUUIDPipe()) postId: string,
   ): Promise<{ success: boolean; message: string }> {
-    return this.postsService.cancelScheduledPost(postId);
+    return this.postsService.deletePost(postId);
   }
 
   @Post(':postId/retry')
@@ -145,8 +172,7 @@ export class PostsController {
   })
   async retryPost(
     @Param('postId', new ParseUUIDPipe()) postId: string,
-    @Query() query: RetryPostQueryDto,
   ): Promise<ScheduledPostResponseDto> {
-    return this.postsService.retryFailedPost(postId, query.scheduledTime);
+    return this.postsService.retryFailedPost(postId);
   }
 }

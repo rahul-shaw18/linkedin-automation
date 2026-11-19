@@ -5,7 +5,11 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuthService } from '../auth/auth.service';
+import { LinkedInPostService } from '../linkedin/linkedin-post.service';
+import { SseEventsService } from '../events/sse-events.service';
 import { CreateScheduledPostDto } from './dto/create-scheduled-post.dto';
+import { UpdatePostDto } from './dto/update-post.dto';
 import { PostStatus, AccountStatus, Prisma } from '@prisma/client';
 
 export const postWithAccountSelect = {
@@ -38,7 +42,12 @@ export type PostWithAccount = Prisma.ScheduledPostGetPayload<{
 export class PostsService {
   private readonly logger = new Logger(PostsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authService: AuthService,
+    private readonly linkedInPostService: LinkedInPostService,
+    private readonly sseEventsService: SseEventsService,
+  ) {}
 
   async createScheduledPost(dto: CreateScheduledPostDto): Promise<PostWithAccount> {
     const scheduledDate = new Date(dto.scheduledTime);
@@ -92,14 +101,7 @@ export class PostsService {
     return newPost;
   }
 
-  async getUserPosts(
-    userId: string,
-    limit: number = 50,
-    offset: number = 0,
-  ): Promise<PostWithAccount[]> {
-    const safeLimit = Math.min(Math.max(1, limit), 100);
-    const safeOffset = Math.max(0, offset);
-
+  async getUserPosts(userId: string): Promise<PostWithAccount[]> {
     return this.prisma.scheduledPost.findMany({
       where: {
         OR: [
@@ -109,8 +111,6 @@ export class PostsService {
         ],
       },
       orderBy: { scheduledTime: 'desc' },
-      take: safeLimit,
-      skip: safeOffset,
       select: postWithAccountSelect,
     });
   }
@@ -128,47 +128,203 @@ export class PostsService {
     return post;
   }
 
-  async cancelScheduledPost(postId: string): Promise<{ success: boolean; message: string }> {
+  async deletePost(postId: string): Promise<{ success: boolean; message: string }> {
     const post = await this.prisma.scheduledPost.findUnique({
       where: { id: postId },
-      select: { id: true, status: true },
+      include: { account: true },
     });
 
     if (!post) {
-      throw new NotFoundException(`Scheduled post ${postId} not found.`);
-    }
-
-    if (post.status === PostStatus.PUBLISHED) {
-      throw new BadRequestException('Cannot delete or cancel a post that has already been published to LinkedIn.');
+      throw new NotFoundException(`Post ${postId} not found.`);
     }
 
     if (post.status === PostStatus.PROCESSING) {
-      throw new BadRequestException('Cannot cancel a post that is currently being processed by the publisher.');
-    }
-
-    // Atomic delete ensuring the post status has not changed to PROCESSING concurrently
-    const deleted = await this.prisma.scheduledPost.deleteMany({
-      where: {
-        id: postId,
-        status: { in: [PostStatus.PENDING, PostStatus.FAILED] },
-      },
-    });
-
-    if (deleted.count === 0) {
       throw new BadRequestException(
-        'Post could not be cancelled because it is already being processed or published.',
+        'Cannot delete a post that is currently being processed by the publisher.',
       );
     }
 
-    this.logger.log(`Post ${postId} was successfully cancelled and deleted.`);
+    // If already published to LinkedIn, delete from LinkedIn first
+    if (post.status === PostStatus.PUBLISHED && post.linkedInPostId) {
+      try {
+        const accessToken = await this.authService.getValidAccessToken(post.account);
+        await this.linkedInPostService.deletePostFromLinkedIn(
+          post.account,
+          post.linkedInPostId,
+          accessToken,
+        );
+      } catch (error) {
+        if (error instanceof NotFoundException) {
+          this.logger.warn(`Post ${post.linkedInPostId} was already removed on LinkedIn.`);
+        } else {
+          const msg = error instanceof Error ? error.message : String(error);
+          this.logger.error(`Failed to delete post ${postId} from LinkedIn: ${msg}`);
+          throw error;
+        }
+      }
+    }
+
+    // Delete from database
+    await this.prisma.scheduledPost.delete({
+      where: { id: postId },
+    });
+
+    this.logger.log(`Post ${postId} (status=${post.status}) successfully deleted.`);
+
+    this.sseEventsService.emitPostEvent({
+      userId: post.userId,
+      type: 'POST_DELETED',
+      post: { id: postId },
+    });
 
     return {
       success: true,
-      message: `Scheduled post ${postId} was successfully cancelled.`,
+      message:
+        post.status === PostStatus.PUBLISHED
+          ? `Post was successfully deleted from LinkedIn and the database.`
+          : `Post was successfully removed.`,
     };
   }
 
-  async retryFailedPost(postId: string, newScheduledTime?: string): Promise<PostWithAccount> {
+  async updatePost(postId: string, dto: UpdatePostDto): Promise<PostWithAccount> {
+    const post = await this.prisma.scheduledPost.findUnique({
+      where: { id: postId },
+      include: { account: true },
+    });
+
+    if (!post) {
+      throw new NotFoundException(`Post ${postId} not found.`);
+    }
+
+    if (post.status === PostStatus.PROCESSING) {
+      throw new BadRequestException(
+        'Cannot edit a post that is currently being processed by the publisher.',
+      );
+    }
+
+    if (dto.content === undefined && dto.scheduledTime === undefined) {
+      throw new BadRequestException('Provide either content or scheduledTime to update the post.');
+    }
+
+    // 1. Published post: LinkedIn API supports partial update of commentary text only
+    if (post.status === PostStatus.PUBLISHED) {
+      if (dto.content !== undefined) {
+        const trimmed = dto.content.trim();
+        if (!trimmed) {
+          throw new BadRequestException('Post commentary cannot be empty.');
+        }
+
+        if (post.linkedInPostId) {
+          const accessToken = await this.authService.getValidAccessToken(post.account);
+          await this.linkedInPostService.updatePostOnLinkedIn(
+            post.account,
+            post.linkedInPostId,
+            trimmed,
+            accessToken,
+          );
+        }
+
+        const updated = await this.prisma.scheduledPost.update({
+          where: { id: postId },
+          data: { content: trimmed },
+          select: postWithAccountSelect,
+        });
+
+        this.sseEventsService.emitPostEvent({
+          userId: post.userId,
+          type: 'POST_UPDATED',
+          post: updated,
+        });
+
+        return updated;
+      }
+
+      if (dto.scheduledTime !== undefined) {
+        throw new BadRequestException(
+          'Cannot modify scheduled time for a post that has already been published to LinkedIn.',
+        );
+      }
+    }
+
+    // 2. Pending post: Can update content and/or scheduled execution time
+    if (post.status === PostStatus.PENDING) {
+      const data: Prisma.ScheduledPostUpdateInput = {};
+
+      if (dto.content !== undefined) {
+        const trimmed = dto.content.trim();
+        if (!trimmed) {
+          throw new BadRequestException('Post commentary cannot be empty.');
+        }
+        data.content = trimmed;
+      }
+
+      if (dto.scheduledTime !== undefined) {
+        const scheduledDate = new Date(dto.scheduledTime);
+        if (isNaN(scheduledDate.getTime())) {
+          throw new BadRequestException('Invalid scheduledTime timestamp provided.');
+        }
+
+        const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+        if (scheduledDate.getTime() < fiveMinutesAgo) {
+          throw new BadRequestException('Cannot schedule a post in the past.');
+        }
+        data.scheduledTime = scheduledDate;
+      }
+
+      const updated = await this.prisma.scheduledPost.update({
+        where: { id: postId },
+        data,
+        select: postWithAccountSelect,
+      });
+
+      this.sseEventsService.emitPostEvent({
+        userId: post.userId,
+        type: 'POST_UPDATED',
+        post: updated,
+      });
+
+      return updated;
+    }
+
+    // 3. Failed post: Can update content and/or scheduled execution time
+    if (post.status === PostStatus.FAILED) {
+      const data: Prisma.ScheduledPostUpdateInput = {};
+
+      if (dto.content !== undefined) {
+        const trimmed = dto.content.trim();
+        if (!trimmed) {
+          throw new BadRequestException('Post commentary cannot be empty.');
+        }
+        data.content = trimmed;
+      }
+
+      if (dto.scheduledTime !== undefined) {
+        const scheduledDate = new Date(dto.scheduledTime);
+        if (isNaN(scheduledDate.getTime())) {
+          throw new BadRequestException('Invalid scheduledTime timestamp provided.');
+        }
+        data.scheduledTime = scheduledDate;
+      }
+
+      const updated = await this.prisma.scheduledPost.update({
+        where: { id: postId },
+        data,
+        select: postWithAccountSelect,
+      });
+
+      this.sseEventsService.emitPostEvent({
+        userId: post.userId,
+        type: 'POST_UPDATED',
+        post: updated,
+      });
+
+      return updated;
+    }
+
+    throw new BadRequestException(`Post with status ${post.status} cannot be edited.`);
+  }
+
+  async retryFailedPost(postId: string): Promise<PostWithAccount> {
     const post = await this.prisma.scheduledPost.findUnique({
       where: { id: postId },
       select: { id: true, status: true },
@@ -182,13 +338,11 @@ export class PostsService {
       throw new BadRequestException(`Only posts with status FAILED can be retried. Current status: ${post.status}`);
     }
 
-    const scheduledDate = newScheduledTime ? new Date(newScheduledTime) : new Date();
-
     return this.prisma.scheduledPost.update({
       where: { id: postId },
       data: {
         status: PostStatus.PENDING,
-        scheduledTime: scheduledDate,
+        scheduledTime: new Date(),
         failureReason: null,
       },
       select: postWithAccountSelect,
