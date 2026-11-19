@@ -15,14 +15,19 @@ export class SessionService {
       httpOnly: true,
       secure: isProd,
       signed: true,
-      sameSite: 'lax',
+      sameSite: isProd ? 'none' : 'lax',
       maxAge: SESSION_MAX_AGE_MS,
       path: '/',
     });
   }
 
   clearSessionCookie(reply: FastifyReply): void {
-    reply.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+    const isProd = this.configService.get<string>('NODE_ENV') === 'production';
+    reply.clearCookie(SESSION_COOKIE_NAME, {
+      path: '/',
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+    });
   }
 
   extractSessionUserId(req: FastifyRequest): string | null {
