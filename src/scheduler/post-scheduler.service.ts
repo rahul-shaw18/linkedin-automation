@@ -110,7 +110,7 @@ export class PostSchedulerService {
       this.sseEventsService.emitPostEvent({
         userId: post.userId,
         type: 'POST_PUBLISHED',
-        post: publishedPost,
+        post: { ...publishedPost, account: post.account },
       });
 
       this.logger.log(`Post ${post.id} published successfully. ID: ${result.postId}`);
@@ -129,7 +129,7 @@ export class PostSchedulerService {
       this.sseEventsService.emitPostEvent({
         userId: post.userId,
         type: 'POST_FAILED',
-        post: failedPost,
+        post: { ...failedPost, account: post.account },
       });
     }
   }

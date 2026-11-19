@@ -6,12 +6,14 @@ import {
   Patch,
   Body,
   Param,
+  Res,
   HttpCode,
   HttpStatus,
   Sse,
   MessageEvent,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import { FastifyReply } from 'fastify';
 import { Observable } from 'rxjs';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { PostsService } from './posts.service';
@@ -34,7 +36,14 @@ export class PostsController {
     description:
       'Provides a real-time HTTP event stream notifying the frontend whenever posts are scheduled, processing, published, or failed.',
   })
-  streamPostEvents(@Param('userId') userId: string): Observable<MessageEvent> {
+  streamPostEvents(
+    @Param('userId') userId: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Observable<MessageEvent> {
+    reply.header('Content-Type', 'text/event-stream');
+    reply.header('Cache-Control', 'no-cache, no-transform');
+    reply.header('Connection', 'keep-alive');
+    reply.header('X-Accel-Buffering', 'no');
     return this.sseEventsService.getUserStream(userId);
   }
 

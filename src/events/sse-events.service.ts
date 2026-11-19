@@ -33,7 +33,17 @@ export class SseEventsService {
     }
 
     const userEvents$ = this.postEvents$.pipe(
-      filter((e) => e.userId === trimmedUserId),
+      filter((e) => {
+        if (e.userId === trimmedUserId) return true;
+        const postAccount = (e.post as Record<string, any>)?.account;
+        if (
+          postAccount &&
+          (postAccount.userId === trimmedUserId || postAccount.linkedInId === trimmedUserId)
+        ) {
+          return true;
+        }
+        return false;
+      }),
       map((event) => ({
         data: JSON.stringify(event),
       })),
